@@ -27,7 +27,7 @@ Each release also has the DMG's SHA-256 checksum (`DoppelDock.dmg.sha256`) and, 
   after they have been out for two weeks.
 - Workflows run with the least permissions they need.
 - `main` can't be force-pushed or deleted, and changes need passing CI.
-- A weekly [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/ZarinLab/doppeldock) check.
+- A weekly [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/ZarinLab/doppeldock) check, and the [OpenSSF Best Practices passing badge](https://www.bestpractices.dev/projects/16924).
 
 ## Reporting a problem
 
