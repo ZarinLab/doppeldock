@@ -6,7 +6,8 @@
 # Runs tests/smoke.sh with the script traced by bashcov (SimpleCov), then counts
 # only shell statements: heredoc bodies (the Mac app's JavaScript, generated
 # scripts and texts) are left out, because bashcov marks them covered whenever
-# the heredoc is written. The JavaScript is only compile-checked by smoke.sh.
+# the heredoc is written. The JavaScript is compile-checked by smoke.sh, which
+# also runs tests/gui_checks.js on the Mac app's code.
 # Fails below the minimum (default 80). Tracing needs a bash newer than macOS's
 # 3.2 (BASH_XTRACEFD):
 #   brew install bash && bundle install

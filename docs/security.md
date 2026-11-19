@@ -99,8 +99,9 @@ running as the same user, and a compromised macOS or Apple toolchain.
 
 - Tests: `tests/smoke.sh` (refusals, signatures, data handling), with at least
   80% of the script's shell statements covered, measured in CI
-  (`tests/coverage.sh`). The embedded JavaScript of the Mac app is only
-  compile-checked; its windows are tested by hand.
+  (`tests/coverage.sh`). The embedded JavaScript of the Mac app is
+  compile-checked, its forms are partly checked by `tests/gui_checks.js`, and its
+  windows are also tested by hand.
 - Static analysis on every change: shellcheck, shfmt, actionlint and zizmor in
   CI (results in the CI logs), and CodeQL (results in the Security tab).
 - The maintainer reviews security-relevant changes against this document

@@ -6,6 +6,22 @@ All notable changes to DoppelDock are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-19
+
+### Changed
+
+- The Mac app no longer uses APIs Apple has deprecated: choosing an app uses
+  content types, the app activates with the current call on macOS 14 and later
+  (and its window is brought to the front), and colour dots are drawn without
+  `lockFocus`.
+
+### Added
+
+- Automated checks of the Mac app's own code (`tests/gui_checks.js`): every app
+  in the App list can be chosen (including one added with Other…), Other… offers
+  only apps, labels are right-aligned, colour dots are drawn.
+  They are regression tests for the two Mac app fixes in 1.1.1.
+
 ## [1.1.1] - 2026-11-19
 
 ### Added
@@ -80,7 +96,8 @@ First public version.
   syntax, compile checks for the built-in JavaScript, and building, changing
   and removing profiles from Electron's sample app.
 
-[Unreleased]: https://github.com/ZarinLab/doppeldock/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/ZarinLab/doppeldock/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/ZarinLab/doppeldock/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/ZarinLab/doppeldock/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/ZarinLab/doppeldock/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ZarinLab/doppeldock/releases/tag/v1.0.0

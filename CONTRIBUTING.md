@@ -14,7 +14,8 @@ Thanks for helping! Bug reports, ideas and pull requests are all welcome.
 |---|---|
 | `doppeldock` | The whole tool: one Bash script. It also contains the Mac app (JavaScript for Automation, in `write_gui_script`) and the icon drawing code |
 | `tests/smoke.sh` | Tests: static checks, plus building, changing and removing profiles from an Electron app |
-| `tests/coverage.sh` | Statement coverage of the script's shell code (bashcov; the embedded JavaScript is only compile-checked); CI requires at least 80% |
+| `tests/gui_checks.js` | Checks of the Mac app's own JavaScript (its forms, without showing them), run by `tests/smoke.sh` |
+| `tests/coverage.sh` | Statement coverage of the script's shell code (bashcov; the embedded JavaScript is compile-checked and partly tested by `tests/gui_checks.js`); CI requires at least 80% |
 | `tools/make-dmg.sh` | Builds `DoppelDock.dmg` |
 | `docs/` | [details](docs/details.md) (reference), [architecture](docs/architecture.md), [security model](docs/security.md), and the README's images |
 | `site/` | The website |
@@ -65,7 +66,7 @@ These keep DoppelDock safe and installable on any Mac:
 |---|---|---|
 | Bash (`doppeldock`, `tests/`, `tools/`) | [Google Shell Style Guide](https://google.github.io/styleguide/shellguide.html), adapted for Bash 3.2 and with two-space indentation | `shfmt` (layout, settings in `.editorconfig`) and `shellcheck` (correctness) |
 | GitHub Actions workflows | [GitHub's security hardening guide](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions) | `actionlint` and `zizmor` |
-| JavaScript for Automation (inside the script) | Follow the existing style: ES5-compatible, `var`, two-space indentation | Compiled with `osacompile` by `tests/smoke.sh` |
+| JavaScript for Automation (inside the script) | Follow the existing style: ES5-compatible, `var`, two-space indentation | Compiled with `osacompile`, and parts run by `tests/gui_checks.js`, in `tests/smoke.sh` |
 
 Contributions must follow these. Check locally before pushing:
 
@@ -80,15 +81,19 @@ uvx --from actionlint-py actionlint && uvx zizmor --offline .
 - Values coming back from AppKit (`state`, `indexOfSelectedItem`,
   `runModal`...) are objects: wrap them in `Number(...)` before comparing.
 - Pass `$()` for `nil`, not `null`, when setting a property.
-- `NSPopUpButton addItemWithTitle:` drops items with the same title; add
-  `NSMenuItem`s to the menu instead.
+- `NSPopUpButton addItemWithTitle:` drops items with the same title. Don't add
+  your own `NSMenuItem`s instead: without the pop-up's action macOS greys them
+  out. Insert under a unique title and rename the item (see `insertApp`).
+- Text alignment numbers differ between Apple silicon and Intel; use
+  `ALIGN_CENTER` and `ALIGN_RIGHT`, not numbers or `$.NSTextAlignment…`.
 
 ## Tests
 
 **Test policy.** Every change that adds or changes behaviour **must** add or
 update tests in `tests/smoke.sh` in the same pull request. Every bug fix
 **must** add a regression test, unless the bug can't be reproduced
-automatically (for example a window layout); then say so in the pull request.
+automatically; then say so in the pull request. Bugs in the Mac app's forms can
+often be tested in `tests/gui_checks.js`.
 Statement coverage of the script's shell code must stay at 80% or more; CI
 checks this (`tests/coverage.sh`).
 

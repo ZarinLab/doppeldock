@@ -98,6 +98,29 @@ for f in "$WORK"/block*.js; do
 done
 ((n >= 5)) && ok "found $n JavaScript blocks" || bad "expected at least 5 JavaScript blocks, found $n"
 
+# The Mac app's own JavaScript, run with tests/gui_checks.js (nothing is shown or launched).
+gui="$(grep -l 'function insertApp(' "$WORK"/block*.js | head -n 1)"
+if [[ -f "$gui" ]]; then
+  cat "$gui" "$ROOT/tests/gui_checks.js" >"$WORK/gui_checks.js"
+  # Results go to stdout; system log noise on stderr is ignored unless osascript fails.
+  if osascript -l JavaScript "$WORK/gui_checks.js" >"$WORK/gui_checks.out" 2>"$WORK/gui_checks.err"; then
+    g=0
+    while IFS= read -r line; do
+      case "$line" in
+        ok\ *) ok "${line#ok }" ;;
+        FAIL\ *) bad "${line#FAIL }" ;;
+        *) continue ;;
+      esac
+      g=$((g + 1))
+    done <"$WORK/gui_checks.out"
+    ((g == 6)) || bad "Mac app checks: expected 6 results, got $g"
+  else
+    bad "Mac app checks did not run: $(tail -n 1 "$WORK/gui_checks.err")"
+  fi
+else
+  bad "Mac app code not found for its checks"
+fi
+
 if [[ -z "$SRC" ]]; then
   echo
   echo "No Electron app given; skipping the profile tests."

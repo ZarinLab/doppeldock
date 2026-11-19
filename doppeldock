@@ -23,7 +23,7 @@ export PATH
 export LC_ALL=en_US.UTF-8 # count characters, not bytes (Dock-started apps have no locale)
 shopt -s nocasematch      # macOS paths are case-insensitive
 
-VERSION="1.1.1"
+VERSION="1.1.2"
 PB=/usr/libexec/PlistBuddy
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 DATA_ROOT="$HOME/Library/Application Support/DoppelDock"
@@ -976,6 +976,12 @@ function alert(title, text, buttons, style) { // -> index of the clicked button
   (buttons || ["OK"]).forEach(function (b) { a.addButtonWithTitle(b); });
   return Number(a.runModal) - 1000;
 }
+// NSApp.activate replaces activateIgnoringOtherApps: from macOS 14; older systems keep the old call.
+function macOSMajor() { return Number($.NSProcessInfo.processInfo.operatingSystemVersion.majorVersion); }
+function activateApp() {
+  if (macOSMajor() >= 14) $.NSApp.activate;
+  else $.NSApp.activateIgnoringOtherApps(true);
+}
 var WEBSITE = "https://zarinlab.github.io/doppeldock/";
 function showAbout() {
   var center = $.NSMutableParagraphStyle.alloc.init;
@@ -998,7 +1004,7 @@ function showAbout() {
     Copyright: "© 2026 The DoppelDock authors",
     Credits: credits
   }));
-  $.NSApp.activateIgnoringOtherApps(true);
+  activateApp();
 }
 // The app menu's "About DoppelDock" shows the panel above (with the website link).
 function hookAboutMenu() {
@@ -1067,12 +1073,21 @@ function badgeImage(appPath, hex, letter, style) {
   return img;
 }
 
+// A colour dot for the Colour list, drawn at twice the size for Retina screens.
 function swatch(hex) {
+  var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
+    null, 28, 28, 8, 4, true, false, "NSDeviceRGBColorSpace", 0, 0);
+  rep.size = $.NSMakeSize(14, 14);
+  $.NSGraphicsContext.saveGraphicsState;
+  try {
+    $.NSGraphicsContext.setCurrentContext($.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep));
+    rgb(hex).setFill;
+    $.NSBezierPath.bezierPathWithOvalInRect($.NSMakeRect(1, 1, 12, 12)).fill;
+  } finally {
+    $.NSGraphicsContext.restoreGraphicsState;
+  }
   var img = $.NSImage.alloc.initWithSize($.NSMakeSize(14, 14));
-  img.lockFocus;
-  rgb(hex).setFill;
-  $.NSBezierPath.bezierPathWithOvalInRect($.NSMakeRect(1, 1, 12, 12)).fill;
-  img.unlockFocus;
+  img.addRepresentation(rep);
   return img;
 }
 
@@ -1165,7 +1180,7 @@ function appTitle(p, list) {
   return same ? base(p) + " (" + p.replace(/\/[^\/]*$/, "").replace($.NSHomeDirectory().js, "~") + ")" : base(p);
 }
 function insertApp(p, list, at) {
-  np.app.insertItemWithTitleAtIndex("⁣doppeldock-" + at, at);
+  np.app.insertItemWithTitleAtIndex("\u2063doppeldock-" + at, at);
   var it = np.app.itemAtIndex(at);
   it.title = appTitle(p, list);
   it.image = smallIcon(p);
@@ -1285,6 +1300,21 @@ function updatePreview() {
     : "Nothing is modified: this opens " + a + " with its own sign-in. While it is open, the Dock shows the normal " + a + " icon.";
 }
 
+// Only apps can be picked with Other…
+function appTypes() { return $([$.NSClassFromString("UTType").typeWithIdentifier("com.apple.application-bundle")]); }
+
+// Adds an app picked with Other… to the App list (once) and selects it.
+function selectOtherApp(path) {
+  var at = np.sources.indexOf(path);
+  if (at < 0) {
+    np.sources.push(path);
+    at = np.sources.length - 1;
+    insertApp(path, np.sources, at);
+  }
+  np.app.selectItemAtIndex(at);
+  np.lastApp = at;
+}
+
 function appChanged() {
   var i = Number(np.app.indexOfSelectedItem);
   if (i < np.sources.length) { np.lastApp = i; return updatePreview(); }
@@ -1292,18 +1322,10 @@ function appChanged() {
   var op = $.NSOpenPanel.openPanel;
   op.message = "Choose an app";
   op.canChooseDirectories = false;
-  op.allowedFileTypes = $(["app"]);
+  op.allowedContentTypes = appTypes();
   op.directoryURL = $.NSURL.fileURLWithPath("/Applications");
   if (Number(op.runModal) === 1) {
-    var path = op.URL.path.js;
-    var at = np.sources.indexOf(path);
-    if (at < 0) {
-      np.sources.push(path);
-      at = np.sources.length - 1;
-      insertApp(path, np.sources, at);
-    }
-    np.app.selectItemAtIndex(at);
-    np.lastApp = at;
+    selectOtherApp(op.URL.path.js);
   } else {
     np.app.selectItemAtIndex(np.lastApp);
   }
@@ -1494,12 +1516,13 @@ function run() {
     loadProfiles();
     ui.win.initialFirstResponder = ui.add;  // focus New Profile, not the list (no row picked by itself)
     ui.win.makeKeyAndOrderFront($());
+    ui.win.orderFrontRegardless;  // in front even if macOS declines to activate the app
     ui.win.makeFirstResponder(ui.add);
     ui.table.deselectAll($());
     updateButtons();
     // AppKit selects the first row once the window is up; undo that so nothing is picked by itself.
     controller.performSelectorWithObjectAfterDelay("clearSelection:", $(), 0.3);
-    $.NSApp.activateIgnoringOtherApps(true);
+    activateApp();
   } catch (e) {
     fail(e);
     $.NSApp.terminate($());
