@@ -16,7 +16,7 @@ GitHub records signed build provenance for it. To check a download with the
 gh attestation verify DoppelDock.dmg -R ZarinLab/doppeldock
 ```
 
-Each release also has the DMG's SHA-256 checksum (`DoppelDock.dmg.sha256`) and, from 1.1.1 on, the signed provenance itself (`DoppelDock.dmg.intoto.jsonl`).
+Each release also has the DMG's SHA-256 checksum (`DoppelDock.dmg.sha256`) and, from the release after 1.1.0, the signed provenance itself (`DoppelDock.dmg.intoto.jsonl`).
 
 ## How the project is protected
 
