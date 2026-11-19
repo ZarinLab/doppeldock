@@ -1,0 +1,7 @@
+# Never commit generated apps, app data or icons made on a user's machine.
+*.app/
+*.icns
+*.iconset/
+*.png
+.DS_Store
+.doppeldock.*

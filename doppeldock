@@ -1,0 +1,1554 @@
+#!/bin/bash
+# DoppelDock: run a second, separately signed-in copy of an Electron app on macOS,
+# with its own data folder and its own Dock icon.
+#
+#   doppeldock                      interactive menu
+#   doppeldock install [--dir DIR]   install the DoppelDock app (Mac dialogs, no Terminal)
+#   doppeldock new --app PATH --name NAME [--mode launcher|copy] [--color COLOR]
+#                  [--badge TEXT] [--style tint+badge|tint|badge]
+#                  [--appearance system|light|dark]
+#                  [--data-dir DIR] [--adopt-data-dir]
+#                  [--install-dir DIR] [--yes]
+#   doppeldock list
+#   doppeldock rebuild APP_PATH [--adopt-data-dir]
+#   doppeldock change APP_PATH [--color C] [--style S] [--appearance A] [--mode M] [--badge B]
+#   doppeldock remove APP_PATH [--delete-data]
+#   doppeldock help
+#
+# https://github.com/ZarinLab/doppeldock (MIT licence)
+
+set -euo pipefail
+PATH=/usr/bin:/bin:/usr/sbin:/sbin   # Apple's tools only (cp -c, mktemp, sed...)
+export PATH
+export LC_ALL=en_US.UTF-8            # count characters, not bytes (Dock-started apps have no locale)
+shopt -s nocasematch                 # macOS paths are case-insensitive
+
+VERSION="1.0.0"
+PB=/usr/libexec/PlistBuddy
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+DATA_ROOT="$HOME/Library/Application Support/DoppelDock"
+LOG_ROOT="$HOME/Library/Logs/DoppelDock"
+MARKER=".doppeldock-profile"         # in each data folder DoppelDock created or adopted
+
+# This script's real path (the copy wrapper calls it to rebuild after an update).
+_s="${BASH_SOURCE[0]}"
+while [[ -L "$_s" ]]; do
+  _t=$(readlink "$_s"); if [[ "$_t" == /* ]]; then _s="$_t"; else _s="$(dirname "$_s")/$_t"; fi
+done
+SELF="$(cd "$(dirname "$_s")" && pwd -P)/$(basename "$_s")"
+unset _s _t
+
+WORK=""
+SWAP_TARGET=""   # set while the old app is moved aside, so an interruption can put it back
+cleanup() {
+  if [[ -n "$SWAP_TARGET" && ! -e "$SWAP_TARGET" && -d "$WORK/previous.app" ]]; then
+    mv "$WORK/previous.app" "$SWAP_TARGET" || true
+  fi
+  if [[ -n "$WORK" && -d "$WORK" ]]; then rm -rf "$WORK"; fi
+  return 0
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+die()  { printf 'doppeldock: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'doppeldock: %s\n' "$*" >&2; }
+info() { printf '%s\n' "$*"; }
+
+plist_get() {
+  # Check first: for a missing file PlistBuddy prints "File Doesn't Exist..." on stdout.
+  [[ -f "$1" ]] || return 0
+  $PB -c "Print :$2" "$1" 2>/dev/null || true
+}
+
+lower() { printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+slugify() {
+  local s
+  s=$(lower "$1" | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//')
+  # Names without Latin letters or digits still get a stable slug.
+  [[ -n "$s" ]] || s="p$(printf '%s' "$1" | cksum | awk '{print $1}')"
+  printf '%s\n' "$s"
+}
+
+# "client x" -> "Client x" (only the first letter is changed)
+capitalize() {
+  local s="$1"
+  printf '%s%s\n' "$(printf '%s' "${s:0:1}" | tr '[:lower:]' '[:upper:]')" "${s:1}"
+}
+
+app_display_name() { basename "$1" .app; }
+
+# Absolute, symlink-free path of an existing directory, in its on-disk letter
+# case (empty if it doesn't exist). /bin/realpath exists on macOS 13 and later.
+canon_dir() {
+  [[ -d "$1" ]] || return 0
+  if [[ -x /bin/realpath ]]; then /bin/realpath "$1" 2>/dev/null && return 0; fi
+  (cd "$1" 2>/dev/null && pwd -P) || true
+}
+
+# Absolute path for a folder that may not exist yet; no "." or ".." parts allowed.
+abs_path() {
+  local p="$1"
+  [[ "$p" == /* ]] || p="$PWD/$p"
+  while [[ "$p" == */ && "$p" != / ]]; do p="${p%/}"; done
+  case "/$p/" in */./*|*/../*) die "path must not contain '.' or '..' parts: $1" ;; esac
+  printf '%s\n' "$p"
+}
+
+is_electron() { [[ -d "$1/Contents/Frameworks/Electron Framework.framework" ]]; }
+
+is_doppeldock_app() { [[ -n "$(plist_get "$1/Contents/Info.plist" DoppelDockProfile)" ]]; }
+
+source_version() {
+  local plist="$1/Contents/Info.plist"
+  printf '%s (%s)\n' "$(plist_get "$plist" CFBundleShortVersionString)" "$(plist_get "$plist" CFBundleVersion)"
+}
+
+validate_label() {
+  local l="$1"
+  [[ -n "$l" ]] || die "profile name is empty"
+  (( ${#l} <= 40 )) || die "profile name is longer than 40 characters"
+  [[ "$l" != */* && "$l" != *:* && "$l" != .* ]] || die "profile name must not contain '/' or ':' or start with '.'"
+  [[ ! "$l" =~ [[:cntrl:]] ]] || die "profile name must not contain control characters"
+}
+
+valid_bundle_id() { [[ "$1" =~ ^local\.doppeldock\.[A-Za-z0-9.-]+$ && "$1" != *..* ]]; }
+
+# Is any process using this data folder (started with --user-data-dir=<dir>)?
+data_dir_in_use() {
+  local dir="$1" cmd
+  while IFS= read -r cmd; do
+    case "$cmd" in *" --user-data-dir=$dir" | *" --user-data-dir=$dir "*) return 0 ;; esac
+  done < <(ps -axo command=)
+  return 1
+}
+
+# Is any process running from inside this app bundle?
+bundle_in_use() {
+  local app="$1" cmd
+  while IFS= read -r cmd; do
+    case "$cmd" in "$app/Contents/"*) return 0 ;; esac
+  done < <(ps -axo command=)
+  return 1
+}
+
+color_hex() {
+  case "$1" in
+    green)  echo "#2F9E44" ;;
+    blue)   echo "#1971C2" ;;
+    purple) echo "#7048E8" ;;
+    pink)   echo "#C2255C" ;;
+    orange) echo "#E8590C" ;;
+    teal)   echo "#0C8599" ;;
+    red)    echo "#E03131" ;;
+    gray|grey) echo "#495057" ;;
+    \#*)    [[ "$1" =~ ^#[0-9A-Fa-f]{6}$ ]] && echo "$1" || echo "" ;;
+    *)      echo "" ;;
+  esac
+}
+
+default_color() {
+  local names=(green blue purple pink orange teal red) sum
+  sum=$(printf '%s' "$1" | cksum | awk '{print $1}')
+  echo "${names[$((sum % ${#names[@]}))]}"
+}
+
+default_install_dir() {
+  if [[ -w /Applications ]]; then echo /Applications; else echo "$HOME/Applications"; fi
+}
+
+# All DoppelDock-made apps in the usual places.
+find_profiles() {
+  local d a
+  for d in /Applications "$HOME/Applications"; do
+    [[ -d "$d" ]] || continue
+    for a in "$d"/*.app; do
+      [[ -e "$a" ]] || continue
+      if is_doppeldock_app "$a"; then echo "$a"; fi
+    done
+  done
+  return 0
+}
+
+# Electron apps that can be used as a source.
+find_sources() {
+  local d a
+  for d in /Applications "$HOME/Applications"; do
+    [[ -d "$d" ]] || continue
+    for a in "$d"/*.app; do
+      [[ -e "$a" ]] || continue
+      is_doppeldock_app "$a" && continue
+      if is_electron "$a"; then echo "$a"; fi
+    done
+  done
+  return 0
+}
+
+need_arg() { [[ $# -ge 2 && -n "$2" ]] || die "option $1 needs a value"; }
+
+# ---------------------------------------------------------------------------
+# icons (drawn with macOS's built-in JavaScript for Automation; no developer tools needed)
+# ---------------------------------------------------------------------------
+
+png_to_icns() { # png out.icns workdir
+  local png="$1" out="$2" iconset="$3/icon.iconset" s d
+  rm -rf "$iconset"
+  mkdir -p "$iconset"
+  for s in 16 32 128 256 512; do
+    sips -z "$s" "$s" "$png" --out "$iconset/icon_${s}x${s}.png" >/dev/null || return 1
+    d=$((s * 2))
+    sips -z "$d" "$d" "$png" --out "$iconset/icon_${s}x${s}@2x.png" >/dev/null || return 1
+  done
+  iconutil -c icns "$iconset" -o "$out" || return 1
+}
+
+# The source app's icon, tinted, with a letter badge.
+make_icon() { # source_app out.icns hex badge workdir style
+  local src="$1" out="$2" hex="$3" badge="$4" work="$5" style="$6"
+  /usr/bin/osascript -l JavaScript - "$src" "$work/icon_1024.png" "$hex" "$badge" "$style" >/dev/null 2>&1 <<'JS' || return 1
+ObjC.import("AppKit");
+function run(argv) {
+  var appPath = argv[0], outPath = argv[1], hex = argv[2], letter = argv[3], style = argv[4] || "tint+badge";
+  var tint = style.indexOf("tint") >= 0, withBadge = style.indexOf("badge") >= 0;
+  var v = parseInt(hex.slice(1), 16);
+  var col = $.NSColor.colorWithSRGBRedGreenBlueAlpha(((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255, 1);
+  var px = 1024;
+  var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
+    null, px, px, 8, 4, true, false, "NSDeviceRGBColorSpace", 0, 0);
+  rep.size = $.NSMakeSize(px, px);
+  $.NSGraphicsContext.saveGraphicsState;
+  var ctx = $.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep);
+  $.NSGraphicsContext.setCurrentContext(ctx);
+
+  // Stay inside the standard macOS icon shape (824 pt rounded square on the 1024
+  // grid); anything outside it makes macOS 26+ put the icon on a grey plate.
+  var body = $.NSMakeRect(100, 100, 824, 824);
+  ctx.saveGraphicsState;
+  $.NSBezierPath.bezierPathWithRoundedRectXRadiusYRadius(body, 185, 185).addClip;
+  // The icon exactly as macOS shows it for the source app (asset-catalog icons too).
+  var icon = $.NSWorkspace.sharedWorkspace.iconForFile(appPath);
+  icon.size = $.NSMakeSize(px, px);
+  icon.drawInRectFromRectOperationFraction($.NSMakeRect(0, 0, px, px), $.NSZeroRect, 2 /* sourceOver */, 1);
+  // Recolour to the profile colour, keeping light and shade.
+  if (tint) {
+    col.setFill;
+    $.NSRectFillUsingOperation(body, 27 /* color */);
+  }
+  ctx.restoreGraphicsState;
+
+  // Badge in the bottom-right corner.
+  if (withBadge) {
+  var d = 330, bx = 924 - d - 18, by = 100 + 18;
+  ctx.saveGraphicsState;
+  var sh = $.NSShadow.alloc.init;
+  sh.shadowBlurRadius = 24;
+  sh.shadowOffset = $.NSMakeSize(0, -8);
+  sh.shadowColor = $.NSColor.blackColor.colorWithAlphaComponent(0.45);
+  sh.set;
+  col.setFill;
+  $.NSBezierPath.bezierPathWithOvalInRect($.NSMakeRect(bx, by, d, d)).fill;
+  ctx.restoreGraphicsState;
+  var ring = $.NSBezierPath.bezierPathWithOvalInRect($.NSMakeRect(bx + 11, by + 11, d - 22, d - 22));
+  ring.lineWidth = 22;
+  $.NSColor.whiteColor.setStroke;
+  ring.stroke;
+
+  var font = $.NSFont.systemFontOfSizeWeight(letter.length > 1 ? 150 : 200, 0.56 /* heavy */);
+  var attrs = $.NSMutableDictionary.alloc.init;
+  attrs.setObjectForKey(font, $("NSFont"));                    // NSFontAttributeName
+  attrs.setObjectForKey($.NSColor.whiteColor, $("NSColor"));  // NSForegroundColorAttributeName
+  var str = $(letter);
+  var ts = str.sizeWithAttributes(attrs);
+  str.drawAtPointWithAttributes($.NSMakePoint(bx + d / 2 - ts.width / 2, by + d / 2 - font.capHeight / 2 + font.descender), attrs);
+  }
+
+  $.NSGraphicsContext.restoreGraphicsState;
+  var data = rep.representationUsingTypeProperties(4 /* PNG */, $());
+  if (!data.writeToFileAtomically(outPath, true)) throw new Error("cannot write " + outPath);
+}
+JS
+  png_to_icns "$work/icon_1024.png" "$out" "$work"
+}
+
+# DoppelDock's own app icon: two overlapping app tiles.
+make_doppeldock_icon() { # out.icns workdir
+  local out="$1" work="$2"
+  /usr/bin/osascript -l JavaScript - "$work/dd_1024.png" >/dev/null 2>&1 <<'JS' || return 1
+ObjC.import("AppKit");
+function rgb(r, g, b) { return $.NSColor.colorWithSRGBRedGreenBlueAlpha(r / 255, g / 255, b / 255, 1); }
+function run(argv) {
+  var px = 1024;
+  var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
+    null, px, px, 8, 4, true, false, "NSDeviceRGBColorSpace", 0, 0);
+  rep.size = $.NSMakeSize(px, px);
+  $.NSGraphicsContext.saveGraphicsState;
+  var ctx = $.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep);
+  $.NSGraphicsContext.setCurrentContext(ctx);
+
+  var body = $.NSBezierPath.bezierPathWithRoundedRectXRadiusYRadius($.NSMakeRect(100, 100, 824, 824), 185, 185);
+  $.NSGradient.alloc.initWithStartingColorEndingColor(rgb(44, 52, 70), rgb(22, 26, 36)).drawInBezierPathAngle(body, -90);
+
+  function tile(x, y, top, bottom) {
+    var p = $.NSBezierPath.bezierPathWithRoundedRectXRadiusYRadius($.NSMakeRect(x, y, 380, 380), 90, 90);
+    ctx.saveGraphicsState;
+    var sh = $.NSShadow.alloc.init;
+    sh.shadowBlurRadius = 30;
+    sh.shadowOffset = $.NSMakeSize(0, -12);
+    sh.shadowColor = $.NSColor.blackColor.colorWithAlphaComponent(0.5);
+    sh.set;
+    rgb(0, 0, 0).setFill;
+    p.fill;
+    ctx.restoreGraphicsState;
+    $.NSGradient.alloc.initWithStartingColorEndingColor(top, bottom).drawInBezierPathAngle(p, -90);
+    $.NSColor.whiteColor.colorWithAlphaComponent(0.9).setStroke;
+    p.lineWidth = 18;
+    p.stroke;
+  }
+  tile(230, 400, rgb(77, 171, 247), rgb(25, 113, 194));   // the original (blue)
+  tile(414, 244, rgb(105, 219, 124), rgb(47, 158, 68));   // its double (green)
+
+  $.NSGraphicsContext.restoreGraphicsState;
+  var data = rep.representationUsingTypeProperties(4 /* PNG */, $());
+  if (!data.writeToFileAtomically(argv[0], true)) throw new Error("cannot write " + argv[0]);
+}
+JS
+  png_to_icns "$work/dd_1024.png" "$out" "$work"
+}
+
+# ---------------------------------------------------------------------------
+# wrappers (the executable of the generated app)
+# ---------------------------------------------------------------------------
+
+write_vars() { # file name=value...
+  local f="$1" kv
+  shift
+  for kv in "$@"; do
+    printf '%s=%q\n' "${kv%%=*}" "${kv#*=}" >> "$f"
+  done
+}
+
+write_launcher_wrapper() { # file source_app source_exec data_dir extra_arg
+  local f="$1"
+  printf '#!/bin/bash\n# Generated by DoppelDock: opens the original app with its own data folder.\nshopt -s nocasematch\n' > "$f"
+  write_vars "$f" "SOURCE_APP=$2" "SOURCE_EXEC=$3" "DATA_DIR=$4" "EXTRA_ARG=$5"
+  cat >> "$f" <<'BODY'
+BIN="$SOURCE_APP/Contents/MacOS/$SOURCE_EXEC"
+mkdir -p "$DATA_DIR"
+
+# Already running with this data folder? Bring it to the front instead of
+# starting a second process on the same folder.
+while read -r pid cmd; do
+  case "$cmd" in
+    "$BIN --user-data-dir=$DATA_DIR" | "$BIN --user-data-dir=$DATA_DIR "*)
+      exec /usr/bin/osascript -l JavaScript \
+        -e 'function run(argv) { ObjC.import("AppKit"); $.NSRunningApplication.runningApplicationWithProcessIdentifier(parseInt(argv[0])).activateWithOptions(3) }' \
+        "$pid" >/dev/null ;;
+  esac
+done < <(ps -axo pid=,command=)
+
+exec /usr/bin/open -n -a "$SOURCE_APP" --args --user-data-dir="$DATA_DIR" ${EXTRA_ARG:+"$EXTRA_ARG"}
+BODY
+  chmod 755 "$f"
+}
+
+write_copy_wrapper() { # file source_app source_exec data_dir doppeldock_path log_file title extra_arg
+  local f="$1"
+  printf '#!/bin/bash\n# Generated by DoppelDock: runs this copy with its own data folder.\n' > "$f"
+  write_vars "$f" "SOURCE_APP=$2" "SOURCE_EXEC=$3" "DATA_DIR=$4" "DOPPELDOCK=$5" "LOG_FILE=$6" "TITLE=$7" "EXTRA_ARG=$8"
+  cat >> "$f" <<'BODY'
+APP="$(cd "$(dirname "$0")/../.." && pwd -P)"
+PB=/usr/libexec/PlistBuddy
+mkdir -p "$DATA_DIR"
+
+notify() {
+  /usr/bin/osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title (item 2 of argv)' -e 'end run' \
+    "$1" "$TITLE" >/dev/null 2>&1
+}
+
+# Rebuild this copy first when the original app has been updated.
+v() { echo "$($PB -c "Print :CFBundleShortVersionString" "$1" 2>/dev/null) ($($PB -c "Print :CFBundleVersion" "$1" 2>/dev/null))"; }
+if [[ -f "$SOURCE_APP/Contents/Info.plist" && -f "$DOPPELDOCK" ]]; then
+  SRC=$(v "$SOURCE_APP/Contents/Info.plist")
+  MINE=$($PB -c "Print :DoppelDockSourceVersion" "$APP/Contents/Info.plist" 2>/dev/null)
+  if [[ "$SRC" != " ()" && "$SRC" != "$MINE" ]]; then
+    notify "Updating to version $SRC…"
+    mkdir -p "$(dirname "$LOG_FILE")"
+    if ! { echo "== $(date) $MINE -> $SRC"; /bin/bash "$DOPPELDOCK" rebuild "$APP"; } >>"$LOG_FILE" 2>&1; then
+      notify "Update failed; opening the previous version. Details: $LOG_FILE"
+    fi
+  fi
+fi
+
+exec "$APP/Contents/MacOS/$SOURCE_EXEC" --user-data-dir="$DATA_DIR" ${EXTRA_ARG:+"$EXTRA_ARG"} "$@"
+BODY
+  chmod 755 "$f"
+}
+
+# ---------------------------------------------------------------------------
+# signing (copy mode)
+# ---------------------------------------------------------------------------
+
+source_entitlements() { # app out.plist
+  codesign -d --entitlements - --xml "$1" > "$2" 2>/dev/null \
+    || codesign -d --entitlements :- "$1" > "$2" 2>/dev/null \
+    || : > "$2"
+}
+
+# Entitlements an ad-hoc signature cannot carry (they need the vendor's team ID
+# or a provisioning profile; macOS refuses to start the app with them). Then
+# allow the copy, which no longer has the vendor's team ID, to load the
+# vendor-signed frameworks while keeping the hardened runtime.
+adapt_entitlements() { # plist
+  local key
+  while IFS= read -r key; do
+    case "$key" in
+      com.apple.application-identifier | com.apple.developer.* | keychain-access-groups | com.apple.security.application-groups \
+        | com.apple.security.cs.allow-dyld-environment-variables)  # not with library validation off
+        $PB -c "Delete :$key" "$1" ;;
+    esac
+  done < <(/usr/bin/osascript -l JavaScript - "$1" <<'JS'
+function run(argv) {
+  ObjC.import("Foundation");
+  var d = $.NSDictionary.dictionaryWithContentsOfFile(argv[0]);
+  return d.isNil() ? "" : ObjC.deepUnwrap(d.allKeys).join("\n");
+}
+JS
+)
+  $PB -c "Delete :com.apple.security.cs.disable-library-validation" "$1" 2>/dev/null || true
+  $PB -c "Add :com.apple.security.cs.disable-library-validation bool true" "$1"
+}
+
+# ---------------------------------------------------------------------------
+# build
+# ---------------------------------------------------------------------------
+
+# The script an own-icon copy calls to rebuild itself: this one, unless it is a
+# temporary download, in which case the installed DoppelDock app's copy.
+rebuild_script() {
+  case "$SELF" in
+    /tmp/* | /private/tmp/* | /var/folders/* | /private/var/folders/*) ;;
+    *) printf '%s\n' "$SELF"; return 0 ;;
+  esac
+  local a
+  for a in /Applications/DoppelDock.app "$HOME/Applications/DoppelDock.app"; do
+    if [[ "$(plist_get "$a/Contents/Info.plist" CFBundleIdentifier)" == "$DOPPELDOCK_APP_ID" && -f "$a/Contents/Resources/doppeldock" ]]; then
+      printf '%s\n' "$a/Contents/Resources/doppeldock"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# build SOURCE LABEL MODE COLOR_HEX BADGE DATA_DIR INSTALL_DIR TARGET_APP ADOPT STYLE
+#   STYLE: tint+badge (default), tint (colour only) or badge (original colours + badge)
+#   TARGET_APP: existing app to rebuild in place, or "" for a new one
+#   ADOPT: 1 to accept an existing, non-empty data folder not made by DoppelDock
+build() {
+  local src label="$2" mode="$3" hex="$4" badge="$5" data_dir="$6" install_dir="$7" target="$8" adopt="$9" style="${10:-tint+badge}" appearance="${11:-system}"
+  style=$(lower "$style"); appearance=$(lower "$appearance"); mode=$(lower "$mode")
+  case "$style" in tint+badge|tint|badge) ;; *) die "style must be tint+badge, tint or badge" ;; esac
+  # Chromium switches (not macOS "-Key value" arguments, which some apps open as files).
+  local extra_arg=""
+  case "$appearance" in
+    system) ;;
+    light) extra_arg="--blink-settings=preferredColorScheme=1" ;;
+    dark) extra_arg="--force-dark-mode" ;;
+    *) die "appearance must be system, light or dark" ;;
+  esac
+
+  src=$(canon_dir "$1")
+  [[ -n "$src" ]] || die "app not found: $1"
+  is_electron "$src" || die "$(app_display_name "$src") is not an Electron app; DoppelDock only supports Electron apps"
+  is_doppeldock_app "$src" && die "$src was made by DoppelDock; pick the original app"
+  [[ "$mode" == launcher || "$mode" == copy ]] || die "mode must be 'launcher' or 'copy'"
+  [[ "$hex" =~ ^#[0-9A-Fa-f]{6}$ ]] || die "colour must be a name or #RRGGBB (got '$hex')"
+  validate_label "$label"
+
+  local src_plist="$src/Contents/Info.plist" src_id src_exec src_name safe_id slug app_name bundle_id app_path
+  src_id=$(plist_get "$src_plist" CFBundleIdentifier)
+  src_exec=$(plist_get "$src_plist" CFBundleExecutable)
+  [[ -n "$src_id" && -n "$src_exec" && "$src_exec" != */* ]] || die "cannot read $src_plist"
+  src_name=$(app_display_name "$src")
+  safe_id=$(printf '%s' "$src_id" | sed -E 's/[^A-Za-z0-9.-]+/-/g; s/\.\.+/./g')
+  slug=$(slugify "$label")
+  bundle_id="local.doppeldock.$safe_id.$slug"
+  valid_bundle_id "$bundle_id" || die "cannot make a bundle ID from '$src_id' and '$label'"
+  [[ -n "$badge" ]] || badge=$(printf '%s' "${label:0:1}" | tr '[:lower:]' '[:upper:]')
+  [[ ${#badge} -le 2 && ! "$badge" =~ [[:cntrl:]] ]] || die "badge must be one or two characters"
+
+  if [[ -n "$target" ]]; then
+    app_path="$target"
+    install_dir=$(dirname "$app_path")
+  else
+    mkdir -p "$install_dir" 2>/dev/null || true
+    install_dir=$(canon_dir "$install_dir")
+    [[ -n "$install_dir" ]] || die "install folder not found: $7"
+    app_name="$src_name $label"
+    app_path="$install_dir/$app_name.app"
+  fi
+  [[ -w "$install_dir" ]] || die "cannot write to $install_dir"
+
+  # Never overwrite anything DoppelDock did not make for this same profile.
+  if [[ -e "$app_path" ]]; then
+    is_doppeldock_app "$app_path" && [[ "$(plist_get "$app_path/Contents/Info.plist" CFBundleIdentifier)" == "$bundle_id" ]] \
+      || die "$app_path already exists and is not this DoppelDock profile; not touching it"
+  fi
+  # "new" never replaces an existing profile; that is what "rebuild" is for.
+  if [[ -z "$target" && -e "$app_path" ]]; then
+    die "$app_path already exists; use 'rebuild' to update it, or pick another name"
+  fi
+  # One app per profile: a second app with the same bundle ID would share its data.
+  local other
+  while IFS= read -r other; do
+    [[ -n "$other" && "$(canon_dir "$other")" != "$(canon_dir "$app_path")" ]] || continue
+    [[ "$(plist_get "$other/Contents/Info.plist" CFBundleIdentifier)" == "$bundle_id" ]] \
+      && die "this profile already exists: $other (use 'rebuild' or pick another name)"
+  done < <(find_profiles)
+
+  # Data folder: absolute, never the home folder itself, and either new/empty,
+  # made by DoppelDock for this profile, or explicitly adopted.
+  if [[ -n "$data_dir" ]]; then data_dir=$(abs_path "$data_dir"); else data_dir="$DATA_ROOT/$safe_id/$slug"; fi
+  case "$data_dir" in
+    / | "$HOME" | "$HOME/Library" | "$HOME/Library/Application Support" | "$src" | "$src/"* | "$app_path" | "$app_path/"*)
+      die "not a usable data folder: $data_dir" ;;
+  esac
+  if [[ -d "$data_dir" && -n "$(ls -A "$data_dir" 2>/dev/null)" ]]; then
+    local owner=""
+    [[ -f "$data_dir/$MARKER" ]] && owner=$(head -n 1 "$data_dir/$MARKER")
+    if [[ "$owner" != "$bundle_id" && "$adopt" != 1 ]]; then
+      die "$data_dir already has data that DoppelDock did not create for this profile; pass --adopt-data-dir to use it anyway"
+    fi
+  fi
+
+  if [[ -e "$app_path" ]] && bundle_in_use "$app_path"; then
+    die "$(app_display_name "$app_path") is running; quit it first"
+  fi
+  # Wherever the other app lives, never build a second app onto a data folder in use.
+  if data_dir_in_use "$data_dir"; then
+    die "the data folder $data_dir is in use by a running app; quit it first"
+  fi
+
+  WORK=$(mktemp -d "$install_dir/.doppeldock.XXXXXX") || die "cannot create a work folder in $install_dir"
+  local bundle plist icon_ok=0
+  bundle="$WORK/$(basename "$app_path")"
+  if make_icon "$src" "$WORK/doppeldock.icns" "$hex" "$badge" "$WORK" "$style"; then
+    icon_ok=1
+  else
+    warn "could not draw the badged icon; using the original icon"
+  fi
+
+  if [[ "$mode" == launcher ]]; then
+    mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
+    plist="$bundle/Contents/Info.plist"
+    cat > "$plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>doppeldock-launch</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+    plutil -replace CFBundleIdentifier -string "$bundle_id" "$plist"
+    plutil -replace CFBundleName -string "$(app_display_name "$app_path")" "$plist"
+    plutil -replace CFBundleDisplayName -string "$(app_display_name "$app_path")" "$plist"
+    if (( icon_ok )); then
+      cp "$WORK/doppeldock.icns" "$bundle/Contents/Resources/doppeldock.icns"
+    else
+      local src_icon
+      src_icon=$(plist_get "$src_plist" CFBundleIconFile)
+      if [[ -n "$src_icon" && "$src_icon" != */* && -f "$src/Contents/Resources/${src_icon%.icns}.icns" ]]; then
+        cp "$src/Contents/Resources/${src_icon%.icns}.icns" "$bundle/Contents/Resources/doppeldock.icns"
+      fi
+    fi
+    plutil -replace CFBundleIconFile -string doppeldock "$plist"
+    write_launcher_wrapper "$bundle/Contents/MacOS/doppeldock-launch" "$src" "$src_exec" "$data_dir" "$extra_arg"
+  else
+    # Don't copy an app while its updater is replacing it.
+    if pgrep -f "$src_id.ShipIt" >/dev/null 2>&1; then
+      die "$src_name is installing an update right now; try again in a minute"
+    fi
+    local version_before
+    version_before=$(source_version "$src")
+    # APFS clone: near-instant and takes almost no extra disk space (same volume).
+    cp -Rc "$src" "$bundle" 2>"$WORK/cp.log" \
+      || die "copying $src_name failed (is it being updated?); try again in a minute"
+    [[ "$(source_version "$src")" == "$version_before" ]] \
+      || die "$src_name changed while it was being copied (an update?); try again"
+    # Start only from an intact, vendor-signed copy.
+    codesign --verify --deep --strict "$bundle" 2>/dev/null \
+      || die "the copy of $src_name does not pass its original signature check; not continuing"
+
+    plist="$bundle/Contents/Info.plist"
+    plutil -replace CFBundleIdentifier -string "$bundle_id" "$plist"
+    plutil -replace CFBundleDisplayName -string "$(app_display_name "$app_path")" "$plist"
+    # CFBundleName stays as it is: Electron finds its helper apps by that name.
+    $PB -c "Delete :CFBundleURLTypes" "$plist" 2>/dev/null || true       # links keep going to the original
+    $PB -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true  # so do files
+    $PB -c "Delete :UTExportedTypeDeclarations" "$plist" 2>/dev/null || true
+    if (( icon_ok )); then
+      cp "$WORK/doppeldock.icns" "$bundle/Contents/Resources/doppeldock.icns"
+      $PB -c "Delete :CFBundleIconName" "$plist" 2>/dev/null || true
+      plutil -replace CFBundleIconFile -string doppeldock "$plist"
+    fi
+    plutil -replace CFBundleExecutable -string doppeldock-launch "$plist"
+    local rs
+    rs=$(rebuild_script)
+    [[ -n "$rs" ]] || die "install the DoppelDock app first (doppeldock install), or run this script from a permanent folder: a copy made from a temporary download could not update itself"
+    write_copy_wrapper "$bundle/Contents/MacOS/doppeldock-launch" "$src" "$src_exec" "$data_dir" \
+      "$rs" "$LOG_ROOT/$bundle_id.log" "$(app_display_name "$app_path")" "$extra_arg"
+
+    source_entitlements "$src" "$WORK/entitlements.plist"
+    [[ -s "$WORK/entitlements.plist" ]] || printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+      '<plist version="1.0"><dict/></plist>' > "$WORK/entitlements.plist"
+    adapt_entitlements "$WORK/entitlements.plist"
+    codesign --force -s - -o runtime -i "$bundle_id" --entitlements "$WORK/entitlements.plist" \
+      "$bundle/Contents/MacOS/$src_exec" 2>/dev/null || die "signing the copy failed"
+  fi
+
+  plutil -replace DoppelDockProfile -string "$slug" "$plist"
+  plutil -replace DoppelDockLabel -string "$label" "$plist"
+  plutil -replace DoppelDockMode -string "$mode" "$plist"
+  plutil -replace DoppelDockColor -string "$hex" "$plist"
+  plutil -replace DoppelDockBadge -string "$badge" "$plist"
+  plutil -replace DoppelDockStyle -string "$style" "$plist"
+  plutil -replace DoppelDockAppearance -string "$appearance" "$plist"
+  plutil -replace DoppelDockSourceApp -string "$src" "$plist"
+  plutil -replace DoppelDockSourceExec -string "$src_exec" "$plist"
+  plutil -replace DoppelDockSourceVersion -string "$(source_version "$src")" "$plist"
+  plutil -replace DoppelDockDataDir -string "$data_dir" "$plist"
+  plutil -replace DoppelDockVersion -string "$VERSION" "$plist"
+  plutil -lint -s "$plist" >/dev/null || die "generated Info.plist is invalid"
+
+  codesign --force -s - -i "$bundle_id" "$bundle" 2>/dev/null || die "signing the app failed"
+  codesign --verify --deep --strict "$bundle" 2>/dev/null || die "signature check failed"
+
+  # Mark the data folder as this profile's (only folders with this mark are ever deleted).
+  mkdir -p "$data_dir"
+  printf '%s\n' "$bundle_id" > "$data_dir/$MARKER"
+
+  # Swap in the new app; put the old one back if that fails.
+  if [[ -e "$app_path" ]] && bundle_in_use "$app_path"; then
+    die "$(app_display_name "$app_path") was started during the build; quit it and try again"
+  fi
+  if [[ -e "$app_path" ]]; then
+    SWAP_TARGET="$app_path"
+    mv "$app_path" "$WORK/previous.app" || die "cannot move the old app out of the way"
+  fi
+  mv "$bundle" "$app_path" || die "cannot install $app_path"   # cleanup puts the old app back
+  SWAP_TARGET=""
+  "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
+  cleanup
+  WORK=""
+
+  info "Built:     $app_path"
+  info "Mode:      $mode (from $src_name $(source_version "$src"))"
+  info "Data:      $data_dir"
+  info "Badge:     $badge on $hex"
+}
+
+# ---------------------------------------------------------------------------
+# commands
+# ---------------------------------------------------------------------------
+
+cmd_new() {
+  local src="" label="" mode="launcher" color="" badge="" data_dir="" install_dir="" yes=0 adopt=0 style="tint+badge" appearance="system"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --app) need_arg "$@"; src="$2"; shift 2 ;;
+      --name) need_arg "$@"; label="$2"; shift 2 ;;
+      --mode) need_arg "$@"; mode="$2"; shift 2 ;;
+      --color|--colour) need_arg "$@"; color="$2"; shift 2 ;;
+      --badge) need_arg "$@"; badge="$2"; shift 2 ;;
+      --style) need_arg "$@"; style="$2"; shift 2 ;;
+      --appearance) need_arg "$@"; appearance="$2"; shift 2 ;;
+      --data-dir) need_arg "$@"; data_dir="$2"; shift 2 ;;
+      --install-dir) need_arg "$@"; install_dir="$2"; shift 2 ;;
+      --adopt-data-dir) adopt=1; shift ;;
+      --yes|-y) yes=1; shift ;;
+      *) die "unknown option for new: $1" ;;
+    esac
+  done
+  [[ -n "$src" && -n "$label" ]] || die "usage: doppeldock new --app PATH --name NAME [--mode launcher|copy] [--color COLOR]"
+  validate_label "$label"
+  [[ -n "$color" ]] || color=$(default_color "$label")
+  local hex; hex=$(color_hex "$color")
+  [[ -n "$hex" ]] || die "unknown colour '$color'"
+  [[ -n "$install_dir" ]] || install_dir=$(default_install_dir)
+  if [[ "$mode" == copy && $yes -eq 0 ]]; then
+    copy_mode_warning
+    confirm "Make a re-signed copy?" || die "cancelled"
+  fi
+  build "$src" "$(capitalize "$label")" "$mode" "$hex" "$badge" "$data_dir" "$install_dir" "" "$adopt" "$style" "$appearance"
+}
+
+cmd_rebuild() {
+  local arg="" adopt=0 app
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --adopt-data-dir) adopt=1; shift ;;
+      -*) die "unknown option for rebuild: $1" ;;
+      *) [[ -z "$arg" ]] || die "rebuild takes one app path"; arg="$1"; shift ;;
+    esac
+  done
+  [[ -n "$arg" ]] || die "usage: doppeldock rebuild APP_PATH [--adopt-data-dir]"
+  app=$(canon_dir "$arg")
+  [[ -n "$app" ]] && is_doppeldock_app "$app" || die "$arg was not made by DoppelDock"
+  local p="$app/Contents/Info.plist"
+  valid_bundle_id "$(plist_get "$p" CFBundleIdentifier)" || die "$app has an unexpected bundle ID; not touching it"
+  build "$(plist_get "$p" DoppelDockSourceApp)" "$(plist_get "$p" DoppelDockLabel)" "$(plist_get "$p" DoppelDockMode)" \
+        "$(plist_get "$p" DoppelDockColor)" "$(plist_get "$p" DoppelDockBadge)" "$(plist_get "$p" DoppelDockDataDir)" \
+        "" "$app" "$adopt" "$(plist_get "$p" DoppelDockStyle)" "$(plist_get "$p" DoppelDockAppearance)"
+}
+
+# Move to the Trash (recoverable) instead of deleting.
+trash() {
+  /usr/bin/osascript -l JavaScript - "$1" >/dev/null 2>&1 <<'JS'
+ObjC.import("Foundation");
+function run(argv) {
+  if (!$.NSFileManager.defaultManager.trashItemAtURLResultingItemURLError($.NSURL.fileURLWithPath(argv[0]), $(), $()))
+    throw new Error("cannot move to the Trash: " + argv[0]);
+}
+JS
+}
+
+# Change an existing profile's look or mode (app, name and data folder stay).
+cmd_change() {
+  local arg="" color="" style="" appearance="" mode="" badge=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --color|--colour) need_arg "$@"; color="$2"; shift 2 ;;
+      --style) need_arg "$@"; style="$2"; shift 2 ;;
+      --appearance) need_arg "$@"; appearance="$2"; shift 2 ;;
+      --mode) need_arg "$@"; mode="$2"; shift 2 ;;
+      --badge) need_arg "$@"; badge="$2"; shift 2 ;;
+      -*) die "unknown option for change: $1" ;;
+      *) [[ -z "$arg" ]] || die "change takes one app path"; arg="$1"; shift ;;
+    esac
+  done
+  [[ -n "$arg" ]] || die "usage: doppeldock change APP_PATH [--color C] [--style S] [--appearance A] [--mode M] [--badge B]"
+  local app p hex
+  app=$(canon_dir "$arg")
+  [[ -n "$app" ]] && is_doppeldock_app "$app" || die "$arg was not made by DoppelDock"
+  p="$app/Contents/Info.plist"
+  valid_bundle_id "$(plist_get "$p" CFBundleIdentifier)" || die "$app has an unexpected bundle ID; not touching it"
+  if [[ -n "$color" ]]; then
+    hex=$(color_hex "$color")
+    [[ -n "$hex" ]] || die "unknown colour '$color'"
+  else
+    hex=$(plist_get "$p" DoppelDockColor)
+  fi
+  [[ -n "$style" ]] || style=$(plist_get "$p" DoppelDockStyle)
+  [[ -n "$appearance" ]] || appearance=$(plist_get "$p" DoppelDockAppearance)
+  [[ -n "$mode" ]] || mode=$(plist_get "$p" DoppelDockMode)
+  [[ -n "$badge" ]] || badge=$(plist_get "$p" DoppelDockBadge)
+  build "$(plist_get "$p" DoppelDockSourceApp)" "$(plist_get "$p" DoppelDockLabel)" "$mode" "$hex" "$badge" \
+        "$(plist_get "$p" DoppelDockDataDir)" "" "$app" 0 "$style" "$appearance"
+}
+
+cmd_remove() {
+  local arg="" delete_data=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --delete-data) delete_data=1; shift ;;
+      -*) die "unknown option for remove: $1" ;;
+      *) [[ -z "$arg" ]] || die "remove takes one app path"; arg="$1"; shift ;;
+    esac
+  done
+  [[ -n "$arg" ]] || die "usage: doppeldock remove APP_PATH [--delete-data]"
+  local app
+  app=$(canon_dir "$arg")
+  [[ -n "$app" ]] && is_doppeldock_app "$app" || die "$arg was not made by DoppelDock; not touching it"
+
+  local p="$app/Contents/Info.plist" bundle_id data_dir
+  bundle_id=$(plist_get "$p" CFBundleIdentifier)
+  data_dir=$(plist_get "$p" DoppelDockDataDir)
+  valid_bundle_id "$bundle_id" || die "$app has an unexpected bundle ID; not touching it"
+  bundle_in_use "$app" && die "$(app_display_name "$app") is running; quit it first"
+  [[ -n "$data_dir" ]] && data_dir_in_use "$data_dir" && die "$(app_display_name "$app") is running; quit it first"
+
+  "$LSREGISTER" -u "$app" >/dev/null 2>&1 || true
+  trash "$app" || die "could not move $app to the Trash"
+  rm -f "$HOME/Library/Preferences/$bundle_id.plist" "$LOG_ROOT/$bundle_id.log"
+  rm -rf "$HOME/Library/Saved Application State/$bundle_id.savedState" "$HOME/Library/Caches/$bundle_id"
+  info "Moved $app to the Trash"
+
+  [[ -n "$data_dir" ]] || return 0
+  if (( delete_data )); then
+    local owner=""
+    [[ -f "$data_dir/$MARKER" ]] && owner=$(head -n 1 "$data_dir/$MARKER")
+    if [[ "$owner" == "$bundle_id" ]]; then
+      trash "$data_dir" || die "could not move $data_dir to the Trash"
+      case "$data_dir" in "$DATA_ROOT"/*) rmdir "$(dirname "$data_dir")" 2>/dev/null || true ;; esac
+      info "Moved data folder $data_dir to the Trash"
+    else
+      warn "not deleting $data_dir: it is not marked as this profile's data folder; delete it yourself if you want"
+    fi
+  else
+    info "Kept data folder (sign-in and settings): $data_dir"
+  fi
+}
+
+cmd_list() {
+  local a p n=0
+  while IFS= read -r a; do
+    [[ -n "$a" ]] || continue
+    p="$a/Contents/Info.plist"
+    n=$((n + 1))
+    printf '%2d) %s\n    mode: %s   source: %s %s\n    data: %s\n' "$n" "$a" \
+      "$(plist_get "$p" DoppelDockMode)" "$(plist_get "$p" DoppelDockSourceApp)" \
+      "$(plist_get "$p" DoppelDockSourceVersion)" "$(plist_get "$p" DoppelDockDataDir)"
+  done < <(find_profiles)
+  (( n )) || info "No DoppelDock apps found in /Applications or ~/Applications."
+}
+
+# ---------------------------------------------------------------------------
+# the DoppelDock app (Mac dialogs, no Terminal)
+# ---------------------------------------------------------------------------
+
+DOPPELDOCK_APP_ID="io.github.zarinlab.doppeldock"
+
+write_gui_script() { # file
+  cat > "$1" <<'JS'
+ObjC.import("Cocoa");
+var app = Application.currentApplication();
+app.includeStandardAdditions = true;
+var TITLE = "DoppelDock";
+var DD = $.NSBundle.mainBundle.bundlePath.js + "/Contents/Resources/doppeldock";
+var LOG_DIR = $.NSHomeDirectory().js + "/Library/Logs/DoppelDock";
+var COLORS = [["Green", "#2F9E44"], ["Blue", "#1971C2"], ["Purple", "#7048E8"], ["Pink", "#C2255C"],
+              ["Orange", "#E8590C"], ["Teal", "#0C8599"], ["Red", "#E03131"], ["Gray", "#495057"]];
+var STYLES = [["Colour and badge", "tint+badge"], ["Colour only", "tint"], ["Badge only (original colours)", "badge"]];
+var APPEARANCES = [["Same as the Mac", "system"], ["Light", "light"], ["Dark", "dark"]];
+
+// ---- helpers ---------------------------------------------------------------
+function q(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+function dd(args) { return app.doShellScript("/bin/bash " + [DD].concat(args).map(q).join(" "), {alteringLineEndings: false}); }
+function lines(s) { return s.split("\n").filter(function (x) { return x.length > 0; }); }
+function base(p) { return String(p).replace(/\/+$/, "").split("/").pop().replace(/\.app$/i, ""); }
+function quoted(s) { return "“" + s + "”"; }
+function cleanError(e) {
+  var m = String((e && e.message) || e);
+  var i = m.lastIndexOf("doppeldock: ");
+  return i >= 0 ? m.slice(i + 12) : m;
+}
+function log(msg) {
+  try {
+    app.doShellScript("mkdir -p " + q(LOG_DIR) + " && printf '%s\\n' " + q(new Date().toISOString() + " " + msg) +
+                      " >> " + q(LOG_DIR + "/app.log"));
+  } catch (e) {}
+}
+function alert(title, text, buttons, style) { // -> index of the clicked button
+  var a = $.NSAlert.alloc.init;
+  a.messageText = title;
+  a.informativeText = text || "";
+  a.alertStyle = (style === undefined) ? 1 : style;  // 1 = informational
+  (buttons || ["OK"]).forEach(function (b) { a.addButtonWithTitle(b); });
+  return Number(a.runModal) - 1000;
+}
+function fail(e) {
+  if (e && e.errorNumber === -128) return;
+  var m = cleanError(e);
+  log(m);
+  alert("DoppelDock could not finish", m, ["OK"], 2);
+}
+function rgb(hex) {
+  var v = parseInt(hex.slice(1), 16);
+  return $.NSColor.colorWithSRGBRedGreenBlueAlpha(((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255, 1);
+}
+function letterOf(name) { return name ? name.charAt(0).toUpperCase() : "?"; }
+
+// The same badged icon the profile will get (preview).
+function badgeImage(appPath, hex, letter, style) {
+  var px = 512, k = px / 1024, col = rgb(hex);
+  var tint = style.indexOf("tint") >= 0, withBadge = style.indexOf("badge") >= 0;
+  var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
+    null, px, px, 8, 4, true, false, "NSDeviceRGBColorSpace", 0, 0);
+  rep.size = $.NSMakeSize(px, px);
+  $.NSGraphicsContext.saveGraphicsState;
+  var ctx = $.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep);
+  $.NSGraphicsContext.setCurrentContext(ctx);
+  var body = $.NSMakeRect(100 * k, 100 * k, 824 * k, 824 * k);
+  ctx.saveGraphicsState;
+  $.NSBezierPath.bezierPathWithRoundedRectXRadiusYRadius(body, 185 * k, 185 * k).addClip;
+  var icon = $.NSWorkspace.sharedWorkspace.iconForFile(appPath);
+  icon.size = $.NSMakeSize(px, px);
+  icon.drawInRectFromRectOperationFraction($.NSMakeRect(0, 0, px, px), $.NSZeroRect, 2, 1);
+  if (tint) { col.setFill; $.NSRectFillUsingOperation(body, 27); }
+  ctx.restoreGraphicsState;
+  if (withBadge) {
+  var d = 330 * k, bx = 924 * k - d - 18 * k, by = 118 * k;
+  col.setFill;
+  $.NSBezierPath.bezierPathWithOvalInRect($.NSMakeRect(bx, by, d, d)).fill;
+  var ring = $.NSBezierPath.bezierPathWithOvalInRect($.NSMakeRect(bx + 11 * k, by + 11 * k, d - 22 * k, d - 22 * k));
+  ring.lineWidth = 22 * k;
+  $.NSColor.whiteColor.setStroke;
+  ring.stroke;
+  var font = $.NSFont.systemFontOfSizeWeight(200 * k, 0.56);
+  var attrs = $.NSMutableDictionary.alloc.init;
+  attrs.setObjectForKey(font, $("NSFont"));
+  attrs.setObjectForKey($.NSColor.whiteColor, $("NSColor"));
+  var str = $(letter), ts = str.sizeWithAttributes(attrs);
+  str.drawAtPointWithAttributes($.NSMakePoint(bx + d / 2 - ts.width / 2, by + d / 2 - font.capHeight / 2 + font.descender), attrs);
+  }
+  $.NSGraphicsContext.restoreGraphicsState;
+  var img = $.NSImage.alloc.initWithSize($.NSMakeSize(px, px));
+  img.addRepresentation(rep);
+  return img;
+}
+
+function swatch(hex) {
+  var img = $.NSImage.alloc.initWithSize($.NSMakeSize(14, 14));
+  img.lockFocus;
+  rgb(hex).setFill;
+  $.NSBezierPath.bezierPathWithOvalInRect($.NSMakeRect(1, 1, 12, 12)).fill;
+  img.unlockFocus;
+  return img;
+}
+
+function smallIcon(path) {
+  var i = $.NSWorkspace.sharedWorkspace.iconForFile(path).copy;
+  i.size = $.NSMakeSize(16, 16);
+  return i;
+}
+
+// ---- state -----------------------------------------------------------------
+var ui = {}, np = null, rows = [], controller;
+
+function loadProfiles(selectPath) {
+  rows = lines(dd(["profiles"])).map(function (path) {
+    var d = $.NSDictionary.dictionaryWithContentsOfFile(path + "/Contents/Info.plist");
+    function g(k) { if (d.isNil()) return ""; var v = d.objectForKey(k); return v.isNil() ? "" : v.js; }
+    return {path: path, name: base(path), label: g("DoppelDockLabel"), mode: g("DoppelDockMode"),
+            sourcePath: g("DoppelDockSourceApp"), source: base(g("DoppelDockSourceApp")),
+            color: g("DoppelDockColor"), style: g("DoppelDockStyle") || "tint+badge",
+            appearance: g("DoppelDockAppearance") || "system",
+            icon: $.NSWorkspace.sharedWorkspace.iconForFile(path)};
+  }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+  ui.table.reloadData;
+  ui.table.deselectAll($());
+  ui.empty.hidden = rows.length > 0;
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].path === selectPath) ui.table.selectRowIndexesByExtendingSelection($.NSIndexSet.indexSetWithIndex(i), false);
+  }
+  updateButtons();
+}
+
+function selected() { var i = Number(ui.table.selectedRow); return (i >= 0 && i < rows.length) ? rows[i] : null; }
+
+function updateButtons() {
+  var has = selected() !== null;
+  ui.open.enabled = has; ui.edit.enabled = has; ui.remove.enabled = has; ui.add.enabled = true;
+}
+
+function setBusy(text) {
+  if (text) {
+    ui.subtitle.stringValue = text;
+    ui.spinner.hidden = false;
+    ui.spinner.startAnimation($());
+    ui.open.enabled = false; ui.edit.enabled = false; ui.remove.enabled = false; ui.add.enabled = false;
+  } else {
+    ui.subtitle.stringValue = ui.subtitleText;
+    ui.spinner.stopAnimation($());
+    ui.spinner.hidden = true;
+    updateButtons();
+  }
+  ui.win.displayIfNeeded;
+}
+
+function guarded(fn) {
+  try { fn(); } catch (e) {
+    setBusy(null);
+    fail(e);
+    try { loadProfiles(); } catch (e2) { log(e2); }
+  }
+}
+
+// ---- New Profile / Edit form -----------------------------------------------
+function label(text, x, y, w, h, size, bold, secondary, mask) {
+  var t = $.NSTextField.labelWithString(text);
+  t.frame = $.NSMakeRect(x, y, w, h);
+  t.font = bold ? $.NSFont.boldSystemFontOfSize(size) : $.NSFont.systemFontOfSize(size);
+  if (secondary) t.textColor = $.NSColor.secondaryLabelColor;
+  t.lineBreakMode = 4;
+  t.autoresizingMask = mask || 0;
+  return t;
+}
+
+function fieldLabel(text, y) {
+  var t = label(text, 4, y + 3, 96, 18, 13, false, false, 0);
+  t.alignment = 1;  // right
+  return t;
+}
+
+function indexOfValue(list, value) {
+  for (var i = 0; i < list.length; i++) if (String(list[i][1]).toUpperCase() === String(value).toUpperCase()) return i;
+  return -1;
+}
+
+// App menu items: NSPopUpButton's addItemWithTitle drops items with the same title,
+// which would put the menu out of step with np.sources, so build NSMenuItems.
+function appTitle(p, list) {
+  var same = list.filter(function (x) { return base(x) === base(p); }).length > 1;
+  return same ? base(p) + " (" + p.replace(/\/[^\/]*$/, "").replace($.NSHomeDirectory().js, "~") + ")" : base(p);
+}
+function appItem(p, list) {
+  var it = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(appTitle(p, list), null, "");
+  it.image = smallIcon(p);
+  return it;
+}
+
+// edit: a profile row to edit, or null for a new profile
+function buildForm(edit) {
+  var W = 540, H = 410;
+  np = {edit: edit, sources: lines(dd(["sources"])), colors: COLORS.slice()};
+  if (edit && np.sources.indexOf(edit.sourcePath) < 0) np.sources.push(edit.sourcePath);
+  np.win = $.NSPanel.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(0, 0, W, H), 1, 2, false);
+  np.win.title = edit ? "Edit " + quoted(edit.name) : "New Profile";
+  var c = np.win.contentView;
+
+  c.addSubview(fieldLabel("App:", H - 60));
+  np.app = $.NSPopUpButton.alloc.initWithFramePullsDown($.NSMakeRect(106, H - 62, 270, 26), false);
+  np.sources.forEach(function (p) { np.app.menu.addItem(appItem(p, np.sources)); });
+  if (!edit) {
+    np.app.menu.addItem($.NSMenuItem.separatorItem);
+    np.app.addItemWithTitle("Other…");
+  }
+  np.app.target = controller;
+  np.app.action = "appChanged:";
+  np.lastApp = edit ? np.sources.indexOf(edit.sourcePath) : 0;
+  np.app.selectItemAtIndex(np.lastApp);
+  np.app.enabled = !edit;
+  c.addSubview(np.app);
+
+  c.addSubview(fieldLabel("Name:", H - 100));
+  np.name = $.NSTextField.alloc.initWithFrame($.NSMakeRect(108, H - 100, 266, 24));
+  np.name.stringValue = edit ? (edit.label || edit.name) : "Personal";
+  np.name.placeholderString = "for example Personal or Work";
+  np.name.delegate = controller;
+  np.name.enabled = !edit;
+  c.addSubview(np.name);
+
+  c.addSubview(fieldLabel("Colour:", H - 140));
+  np.color = $.NSPopUpButton.alloc.initWithFramePullsDown($.NSMakeRect(106, H - 142, 270, 26), false);
+  if (edit && indexOfValue(np.colors, edit.color) < 0 && edit.color) np.colors.push(["Custom", edit.color]);
+  np.colors.forEach(function (cl) { np.color.addItemWithTitle(cl[0]); np.color.lastItem.image = swatch(cl[1]); });
+  var pick = 0;
+  if (edit) {
+    pick = Math.max(0, indexOfValue(np.colors, edit.color));
+  } else {
+    var used = rows.map(function (r) { return String(r.color).toUpperCase(); });
+    for (var i = 0; i < np.colors.length; i++) { if (used.indexOf(np.colors[i][1]) < 0) { pick = i; break; } }
+  }
+  np.color.selectItemAtIndex(pick);
+  np.color.target = controller;
+  np.color.action = "previewChanged:";
+  c.addSubview(np.color);
+
+  c.addSubview(fieldLabel("Style:", H - 180));
+  np.style = $.NSPopUpButton.alloc.initWithFramePullsDown($.NSMakeRect(106, H - 182, 270, 26), false);
+  STYLES.forEach(function (s) { np.style.addItemWithTitle(s[0]); });
+  np.style.selectItemAtIndex(edit ? Math.max(0, indexOfValue(STYLES, edit.style)) : 0);
+  np.style.target = controller;
+  np.style.action = "previewChanged:";
+  c.addSubview(np.style);
+
+  c.addSubview(fieldLabel("Appearance:", H - 220));
+  np.appearance = $.NSPopUpButton.alloc.initWithFramePullsDown($.NSMakeRect(106, H - 222, 270, 26), false);
+  APPEARANCES.forEach(function (a) { np.appearance.addItemWithTitle(a[0]); });
+  np.appearance.selectItemAtIndex(edit ? Math.max(0, indexOfValue(APPEARANCES, edit.appearance)) : 0);
+  c.addSubview(np.appearance);
+
+  np.own = $.NSButton.checkboxWithTitleTargetAction("Show its own icon in the Dock while it is open", controller, "previewChanged:");
+  np.own.frame = $.NSMakeRect(106, H - 266, 410, 22);
+  np.own.state = (!edit || edit.mode === "copy") ? 1 : 0;
+  c.addSubview(np.own);
+  np.help = $.NSTextField.wrappingLabelWithString("");
+  np.help.frame = $.NSMakeRect(126, 64, W - 146, 72);
+  np.help.font = $.NSFont.systemFontOfSize(11);
+  np.help.textColor = $.NSColor.secondaryLabelColor;
+  c.addSubview(np.help);
+
+  np.preview = $.NSImageView.alloc.initWithFrame($.NSMakeRect(W - 136, H - 150, 112, 112));
+  np.preview.imageScaling = 3;  // proportionally up or down
+  c.addSubview(np.preview);
+
+  var cancel = $.NSButton.buttonWithTitleTargetAction("Cancel", controller, "panelCancel:");
+  cancel.frame = $.NSMakeRect(W - 216, 14, 96, 32);
+  cancel.keyEquivalent = "\u001b";
+  c.addSubview(cancel);
+  var ok = $.NSButton.buttonWithTitleTargetAction(edit ? "Save" : "Create", controller, "panelCreate:");
+  ok.frame = $.NSMakeRect(W - 116, 14, 96, 32);
+  ok.keyEquivalent = "\r";
+  c.addSubview(ok);
+
+  updatePreview();
+  np.win.center;
+}
+
+function appName() { var i = Number(np.app.indexOfSelectedItem); return i < np.sources.length ? base(np.sources[i]) : "the app"; }
+
+function formValues() {
+  return {
+    src: np.sources[Number(np.app.indexOfSelectedItem)],
+    name: np.name.stringValue.js.trim(),
+    hex: np.colors[Number(np.color.indexOfSelectedItem)][1],
+    style: STYLES[Number(np.style.indexOfSelectedItem)][1],
+    appearance: APPEARANCES[Number(np.appearance.indexOfSelectedItem)][1],
+    mode: Number(np.own.state) === 1 ? "copy" : "launcher"
+  };
+}
+
+function updatePreview() {
+  if (!np) return;
+  var v = formValues();
+  if (v.src) np.preview.image = badgeImage(v.src, v.hex, letterOf(v.name), v.style);
+  var a = appName();
+  np.help.stringValue = v.mode === "copy"
+    ? "DoppelDock makes a separate copy of " + a + " and signs it on this Mac, so the open window shows this icon. " +
+      "Because it is not signed by " + a + "\u2019s maker, the copy is less protected against other programs changing it. " +
+      "macOS may ask again for permissions, and whether it may use “" + a + " Safe Storage” (choose Always Allow). " +
+      "Check " + a + "’s terms of use before using a modified copy."
+    : "Nothing is modified: this opens " + a + " with its own sign-in. While it is open, the Dock shows the normal " + a + " icon.";
+}
+
+function appChanged() {
+  var i = Number(np.app.indexOfSelectedItem);
+  if (i < np.sources.length) { np.lastApp = i; return updatePreview(); }
+  // "Other…"
+  var op = $.NSOpenPanel.openPanel;
+  op.message = "Choose an app";
+  op.canChooseDirectories = false;
+  op.allowedFileTypes = $(["app"]);
+  op.directoryURL = $.NSURL.fileURLWithPath("/Applications");
+  if (Number(op.runModal) === 1) {
+    var path = op.URL.path.js;
+    var at = np.sources.indexOf(path);
+    if (at < 0) {
+      np.sources.push(path);
+      at = np.sources.length - 1;
+      np.app.menu.insertItemAtIndex(appItem(path, np.sources), at);
+    }
+    np.app.selectItemAtIndex(at);
+    np.lastApp = at;
+  } else {
+    np.app.selectItemAtIndex(np.lastApp);
+  }
+  updatePreview();
+}
+
+function runForm(edit) { // -> form values, or null if cancelled
+  buildForm(edit);
+  var code = $.NSApp.runModalForWindow(np.win);
+  np.win.orderOut($());
+  var v = Number(code) === 1 ? formValues() : null;
+  np = null;
+  return v;
+}
+
+function newProfile() {
+  var v = runForm(null);
+  if (!v) return;
+  var full = base(v.src) + " " + v.name.charAt(0).toUpperCase() + v.name.slice(1);
+  setBusy("Creating " + quoted(full) + "…");
+  var out = dd(["new", "--app", v.src, "--name", v.name, "--mode", v.mode, "--color", v.hex,
+                "--style", v.style, "--appearance", v.appearance, "--yes"]);
+  setBusy(null);
+  var found = out.match(/^Built:\s+(.*)$/m);
+  var made = found ? found[1] : "";
+  if (!made) { loadProfiles(); return; }
+  loadProfiles(made);
+  if (alert(quoted(base(made)) + " is ready",
+            "Open it and sign in with your other account. To keep it in the Dock, right-click its icon while it is open and choose Options › Keep in Dock.",
+            ["Open", "Later"]) === 0 && made) openPath(made);
+}
+
+function editSelected() {
+  var p = selected(); if (!p) return;
+  var v = runForm(p);
+  if (!v) return;
+  setBusy("Saving " + quoted(p.name) + "…");
+  dd(["change", p.path, "--mode", v.mode, "--color", v.hex, "--style", v.style, "--appearance", v.appearance]);
+  setBusy(null);
+  loadProfiles(p.path);
+}
+
+// ---- other actions ---------------------------------------------------------
+function openPath(path) { $.NSWorkspace.sharedWorkspace.openURL($.NSURL.fileURLWithPath(path)); }
+
+function openSelected() { var p = selected(); if (p) openPath(p.path); }
+
+function removeSelected() {
+  var p = selected(); if (!p) return;
+  var a = $.NSAlert.alloc.init;
+  a.messageText = "Remove " + quoted(p.name) + "?";
+  a.informativeText = "This moves the " + p.name + " app to the Trash. " + p.source + " itself, and your usual " +
+                      p.source + " sign-in, are not affected.";
+  a.alertStyle = 0;  // warning
+  a.icon = p.icon;
+  var rm = a.addButtonWithTitle("Remove");
+  rm.hasDestructiveAction = true;
+  a.addButtonWithTitle("Cancel");
+  a.showsSuppressionButton = true;
+  a.suppressionButton.title = "Also delete this profile’s sign-in and settings";
+  if (Number(a.runModal) !== 1000) return;
+  var args = ["remove", p.path];
+  if (Number(a.suppressionButton.state) === 1) args.push("--delete-data");
+  setBusy("Removing " + quoted(p.name) + "…");
+  dd(args);
+  setBusy(null);
+  loadProfiles();
+}
+
+// ---- main window -----------------------------------------------------------
+ObjC.registerSubclass({
+  name: "DDController",
+  protocols: ["NSTableViewDataSource", "NSTableViewDelegate", "NSWindowDelegate", "NSTextFieldDelegate"],
+  methods: {
+    "numberOfRowsInTableView:": {types: ["long", ["id"]], implementation: function (tv) { return rows.length; }},
+    "tableView:viewForTableColumn:row:": {types: ["id", ["id", "id", "long"]],
+      implementation: function (tv, col, row) { return rowView(rows[row]); }},
+    "tableViewSelectionDidChange:": {types: ["void", ["id"]], implementation: function (n) { updateButtons(); }},
+    "newProfile:": {types: ["void", ["id"]], implementation: function (s) { guarded(newProfile); }},
+    "openProfile:": {types: ["void", ["id"]], implementation: function (s) { guarded(openSelected); }},
+    "editProfile:": {types: ["void", ["id"]], implementation: function (s) { guarded(editSelected); }},
+    "clearSelection:": {types: ["void", ["id"]], implementation: function (s) { ui.table.deselectAll($()); updateButtons(); }},
+    "removeProfile:": {types: ["void", ["id"]], implementation: function (s) { guarded(removeSelected); }},
+    "appChanged:": {types: ["void", ["id"]], implementation: function (s) { try { appChanged(); } catch (e) { fail(e); } }},
+    "previewChanged:": {types: ["void", ["id"]], implementation: function (s) { try { updatePreview(); } catch (e) { log(e); } }},
+    "controlTextDidChange:": {types: ["void", ["id"]], implementation: function (n) { try { updatePreview(); } catch (e) { log(e); } }},
+    "panelCancel:": {types: ["void", ["id"]], implementation: function (s) { $.NSApp.stopModalWithCode(0); }},
+    "panelCreate:": {types: ["void", ["id"]], implementation: function (s) {
+      if (!np.name.stringValue.js.trim()) { $.NSBeep(); return; }
+      if (Number(np.app.indexOfSelectedItem) >= np.sources.length) { $.NSBeep(); return; }
+      $.NSApp.stopModalWithCode(1);
+    }},
+    "windowWillClose:": {types: ["void", ["id"]], implementation: function (n) {
+      if (n.object.isEqual(ui.win)) $.NSApp.terminate($());
+    }}
+  }
+});
+
+function rowView(p) {
+  var v = $.NSTableCellView.alloc.initWithFrame($.NSMakeRect(0, 0, 500, 52));
+  var iv = $.NSImageView.imageViewWithImage(p.icon);
+  iv.frame = $.NSMakeRect(6, 6, 40, 40);
+  v.addSubview(iv);
+  v.addSubview(label(p.name, 56, 26, 430, 18, 13, true, false, 2));
+  var how = p.mode === "copy" ? "own icon in the Dock" : "same icon in the Dock";
+  if (p.appearance === "light") how += " · always Light"; else if (p.appearance === "dark") how += " · always Dark";
+  v.addSubview(label("from " + p.source + " · " + how, 56, 8, 430, 16, 11, false, true, 2));
+  return v;
+}
+
+function button(title, action, x, w, mask) {
+  var b = $.NSButton.buttonWithTitleTargetAction(title, controller, action);
+  b.frame = $.NSMakeRect(x, 14, w, 32);
+  b.autoresizingMask = mask;
+  ui.win.contentView.addSubview(b);
+  return b;
+}
+
+function buildWindow() {
+  controller = $.DDController.alloc.init;
+  var W = 560, H = 440;
+  ui.win = $.NSWindow.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(0, 0, W, H), 1 | 2 | 4 | 8, 2, false);
+  ui.win.title = TITLE;
+  ui.win.releasedWhenClosed = false;
+  ui.win.minSize = $.NSMakeSize(460, 320);
+  ui.win.delegate = controller;
+  var c = ui.win.contentView;
+
+  c.addSubview(label("Your profiles", 20, H - 44, W - 70, 24, 17, true, false, 2 | 8));
+  ui.subtitleText = "Each profile is a second copy of an app, with its own sign-in.";
+  ui.subtitle = label(ui.subtitleText, 20, H - 66, W - 70, 18, 12, false, true, 2 | 8);
+  c.addSubview(ui.subtitle);
+  ui.spinner = $.NSProgressIndicator.alloc.initWithFrame($.NSMakeRect(W - 40, H - 62, 16, 16));
+  ui.spinner.style = 1;
+  ui.spinner.controlSize = 1;
+  ui.spinner.usesThreadedAnimation = true;
+  ui.spinner.hidden = true;
+  ui.spinner.autoresizingMask = 1 | 8;
+  c.addSubview(ui.spinner);
+
+  var scroll = $.NSScrollView.alloc.initWithFrame($.NSMakeRect(20, 60, W - 40, H - 140));
+  scroll.hasVerticalScroller = true;
+  scroll.borderType = 2;
+  scroll.autoresizingMask = 2 | 16;
+  ui.table = $.NSTableView.alloc.initWithFrame($.NSMakeRect(0, 0, W - 40, H - 140));
+  var col = $.NSTableColumn.alloc.initWithIdentifier("profile");
+  col.resizingMask = 1;
+  ui.table.addTableColumn(col);
+  ui.table.headerView = $();
+  ui.table.rowHeight = 52;
+  ui.table.columnAutoresizingStyle = 1;
+  ui.table.dataSource = controller;
+  ui.table.delegate = controller;
+  ui.table.target = controller;
+  ui.table.doubleAction = "openProfile:";
+  scroll.documentView = ui.table;
+  c.addSubview(scroll);
+  col.width = W - 46;
+
+  ui.empty = $.NSTextField.wrappingLabelWithString("No profiles yet.\nClick New Profile to make your first one.");
+  ui.empty.frame = $.NSMakeRect(40, (H - 80) / 2 + 20, W - 80, 40);
+  ui.empty.alignment = 2;
+  ui.empty.textColor = $.NSColor.secondaryLabelColor;
+  ui.empty.autoresizingMask = 2 | 8 | 32;
+  c.addSubview(ui.empty);
+
+  ui.remove = button("Remove…", "removeProfile:", 20, 100, 0);
+  ui.edit = button("Edit\u2026", "editProfile:", 122, 90, 0);
+  ui.open = button("Open", "openProfile:", 214, 80, 0);
+  ui.add = button("New Profile…", "newProfile:", W - 20 - 140, 140, 1);
+  ui.add.keyEquivalent = "\r";
+
+  ui.win.center;
+}
+
+function run() {
+  try {
+    buildWindow();
+    loadProfiles();
+    ui.win.initialFirstResponder = ui.add;  // focus New Profile, not the list (no row picked by itself)
+    ui.win.makeKeyAndOrderFront($());
+    ui.win.makeFirstResponder(ui.add);
+    ui.table.deselectAll($());
+    updateButtons();
+    // AppKit selects the first row once the window is up; undo that so nothing is picked by itself.
+    controller.performSelectorWithObjectAfterDelay("clearSelection:", $(), 0.3);
+    $.NSApp.activateIgnoringOtherApps(true);
+  } catch (e) {
+    fail(e);
+    $.NSApp.terminate($());
+  }
+}
+
+function reopen() { if (ui.win) ui.win.makeKeyAndOrderFront($()); }
+JS
+}
+
+cmd_install() {
+  local dir=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dir) need_arg "$@"; dir="$2"; shift 2 ;;
+      *) die "unknown option for install: $1" ;;
+    esac
+  done
+  [[ -n "$dir" ]] || dir=$(default_install_dir)
+  mkdir -p "$dir" 2>/dev/null || true
+  dir=$(canon_dir "$dir")
+  [[ -n "$dir" && -w "$dir" ]] || die "cannot write to ${dir:-the install folder}"
+  local target="$dir/DoppelDock.app"
+  if [[ -e "$target" ]]; then
+    [[ "$(plist_get "$target/Contents/Info.plist" CFBundleIdentifier)" == "$DOPPELDOCK_APP_ID" ]] \
+      || die "$target exists and is not DoppelDock; not touching it"
+    bundle_in_use "$target" && die "DoppelDock is open; quit it first"
+  fi
+
+  WORK=$(mktemp -d "$dir/.doppeldock.XXXXXX") || die "cannot create a work folder in $dir"
+  local app="$WORK/DoppelDock.app" plist
+  write_gui_script "$WORK/gui.js"
+  osacompile -l JavaScript -s -o "$app" "$WORK/gui.js" 2>"$WORK/osacompile.log" \
+    || die "building the DoppelDock app failed: $(cat "$WORK/osacompile.log")"
+  plist="$app/Contents/Info.plist"
+  cp "$SELF" "$app/Contents/Resources/doppeldock"
+  chmod 755 "$app/Contents/Resources/doppeldock"
+  plutil -replace CFBundleIdentifier -string "$DOPPELDOCK_APP_ID" "$plist"
+  plutil -replace CFBundleName -string DoppelDock "$plist"
+  plutil -replace CFBundleShortVersionString -string "$VERSION" "$plist"
+  if make_doppeldock_icon "$app/Contents/Resources/applet.icns" "$WORK"; then
+    $PB -c "Delete :CFBundleIconName" "$plist" 2>/dev/null || true
+    plutil -replace CFBundleIconFile -string applet "$plist"
+    rm -f "$app/Contents/Resources/Assets.car"
+  fi
+  codesign --force -s - -i "$DOPPELDOCK_APP_ID" "$app" 2>/dev/null || die "signing the DoppelDock app failed"
+  codesign --verify --deep --strict "$app" 2>/dev/null || die "signature check failed"
+
+  if [[ -e "$target" ]]; then
+    SWAP_TARGET="$target"
+    mv "$target" "$WORK/previous.app" || die "cannot move the old DoppelDock app out of the way"
+  fi
+  mv "$app" "$target" || die "cannot install $target"
+  SWAP_TARGET=""
+  "$LSREGISTER" -f "$target" >/dev/null 2>&1 || true
+  cleanup
+  WORK=""
+  info "Installed: $target"
+  info "Open DoppelDock from your Applications folder."
+}
+
+# ---------------------------------------------------------------------------
+# Terminal menu
+# ---------------------------------------------------------------------------
+
+confirm() { # question -> 0 for yes
+  local a
+  read -r -p "$1 [y/N] " a || return 1
+  [[ "$a" == y || "$a" == yes ]]
+}
+
+copy_mode_warning() {
+  cat <<'TXT'
+
+  To give it its own icon, DoppelDock makes a copy of the app and signs it on
+  this Mac (instead of the app's maker).
+
+  - The copy updates itself from the original the next time you open it after
+    an update.
+  - macOS may ask again for permissions such as camera or microphone, and
+    whether the copy may use "<App> Safe Storage". Choose "Always Allow".
+  - The copy is not signed by the app's maker, so it is less protected
+    against other programs on this Mac changing it.
+  - A few features of the app may not work in the copy.
+  - The app's terms of use may not allow modifying it. Please check them.
+
+TXT
+}
+
+pick_from_list() { # prompt items... ; prints the chosen item, returns 1 on q/empty
+  local prompt="$1" i choice
+  shift
+  local items=("$@")
+  for i in "${!items[@]}"; do
+    printf '  %2d) %s\n' "$((i + 1))" "$(app_display_name "${items[$i]}")" >&2
+  done
+  read -r -p "$prompt" choice || return 1
+  [[ -n "$choice" && "$choice" != q ]] || return 1
+  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
+    printf '%s\n' "${items[$((choice - 1))]}"
+  else
+    printf '%s\n' "$choice"
+  fi
+}
+
+# A path typed or dragged into Terminal: trim, unquote, unescape.
+clean_path() {
+  printf '%s' "$1" | sed -E "s/^[[:space:]]+//; s/[[:space:]]+\$//" | sed -E "s/^[\"']//; s/[\"']\$//" | sed -E 's/\\(.)/\1/g'
+}
+
+menu_new() {
+  local sources=() a src label mode=launcher choice dir made
+  while IFS= read -r a; do [[ -n "$a" ]] && sources+=("$a"); done < <(find_sources)
+  echo
+  echo "Which app would you like a second copy of?"
+  if (( ${#sources[@]} )); then
+    src=$(pick_from_list "Number (or drag an app here, q to go back): " "${sources[@]}") || return 0
+  else
+    read -r -p "Drag the app here: " src || return 0
+  fi
+  src=$(clean_path "$src")
+  src="${src%/}"
+  [[ -d "$src" ]] || { warn "not found: $src"; return 0; }
+  is_electron "$src" || { warn "$(app_display_name "$src") is not an Electron app; DoppelDock only supports Electron apps"; return 0; }
+
+  echo
+  read -r -p "Name for this profile [Personal]: " label || return 0
+  [[ -n "$label" ]] || label=Personal
+  ( validate_label "$label" ) || return 0
+  label=$(capitalize "$label")
+
+  echo
+  echo "Should it show its own icon in the Dock while it is open?"
+  echo "  1) Yes, DoppelDock makes a separate copy of the app"
+  echo "  2) No, nothing is modified"
+  read -r -p "Choose [1]: " choice || return 0
+  if [[ "$choice" != 2 ]]; then
+    copy_mode_warning
+    confirm "Make the copy?" || { echo "Cancelled."; return 0; }
+    mode=copy
+  fi
+
+  dir=$(default_install_dir)
+  made="$dir/$(app_display_name "$src") $label.app"
+  echo
+  /bin/bash "$SELF" new --app "$src" --name "$label" --mode "$mode" --install-dir "$dir" --yes || return 0
+  echo
+  echo "Open it, sign in with your other account, and keep it in the Dock"
+  echo "(right-click its icon while it is open: Options > Keep in Dock)."
+  if confirm "Open it now?"; then open "$made"; fi
+  return 0
+}
+
+menu_pick_profile() { # prompt -> path
+  local profiles=() a
+  while IFS= read -r a; do [[ -n "$a" ]] && profiles+=("$a"); done < <(find_profiles)
+  (( ${#profiles[@]} )) || { echo "You have no profiles yet." >&2; return 1; }
+  pick_from_list "$1" "${profiles[@]}"
+}
+
+menu_rebuild() {
+  local app
+  app=$(menu_pick_profile "Update which? (q to go back) ") || return 0
+  /bin/bash "$SELF" rebuild "$app" || true
+}
+
+menu_remove() {
+  local app
+  app=$(menu_pick_profile "Remove which? (q to go back) ") || return 0
+  is_doppeldock_app "$app" || { warn "not a DoppelDock app: $app"; return 0; }
+  confirm "Remove $(app_display_name "$app")?" || return 0
+  if confirm "Also move its sign-in and settings to the Trash?"; then
+    /bin/bash "$SELF" remove "$app" --delete-data || true
+  else
+    /bin/bash "$SELF" remove "$app" || true
+  fi
+}
+
+menu() {
+  while true; do
+    cat <<TXT
+
+DoppelDock: use a second account in an app, side by side
+   1) New profile
+   2) My profiles
+   3) Update a profile
+   4) Remove a profile
+   5) Install the DoppelDock app (no Terminal next time)
+   q) Quit
+TXT
+    local choice
+    read -r -p "Choose: " choice || exit 0
+    case "$choice" in
+      1) menu_new ;;
+      2) echo; cmd_list ;;
+      3) menu_rebuild ;;
+      4) menu_remove ;;
+      5) /bin/bash "$SELF" install || true ;;
+      q|"") exit 0 ;;
+      *) echo "Unknown choice." ;;
+    esac
+  done
+}
+
+usage() { sed -n '2,18p' "$SELF" | sed 's/^# \{0,1\}//'; }
+
+# ---------------------------------------------------------------------------
+
+[[ "$(uname -s)" == Darwin ]] || die "DoppelDock runs on macOS only"
+
+case "${1:-}" in
+  "") menu ;;
+  install) shift; cmd_install "$@" ;;
+  new) shift; cmd_new "$@" ;;
+  list) cmd_list ;;
+  rebuild) shift; cmd_rebuild "$@" ;;
+  change) shift; cmd_change "$@" ;;
+  remove) shift; cmd_remove "$@" ;;
+  sources) find_sources ;;    # used by the DoppelDock app
+  profiles) find_profiles ;;  # used by the DoppelDock app
+  help|-h|--help) usage ;;
+  --version|version) echo "DoppelDock $VERSION" ;;
+  *) die "unknown command '$1' (try: doppeldock help)" ;;
+esac
