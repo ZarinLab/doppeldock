@@ -1,0 +1,35 @@
+name: DCO
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dco:
+    name: Developer Certificate of Origin
+    # Bot pull requests (Dependabot) are exempt; decided by who opened the PR,
+    # which can't be faked like a commit's author email.
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Every commit is signed off by its author
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          fail=0
+          for c in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            email="$(git log -1 --format=%ae "$c")"
+            if ! git log -1 --format='%(trailers:key=Signed-off-by,valueonly)' "$c" | grep -qF "<$email>"; then
+              echo "::error::Commit ${c:0:7} has no 'Signed-off-by: ... <$email>' line. Use 'git commit -s' (see CONTRIBUTING.md)."
+              fail=1
+            fi
+          done
+          exit "$fail"

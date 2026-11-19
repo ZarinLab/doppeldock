@@ -12,7 +12,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/dist}"
 VERSION="$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$ROOT/doppeldock")"
-[[ -n "$VERSION" ]] || { echo "make-dmg: cannot read VERSION from doppeldock" >&2; exit 1; }
+[[ -n "$VERSION" ]] || {
+  echo "make-dmg: cannot read VERSION from doppeldock" >&2
+  exit 1
+}
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -23,7 +26,7 @@ mkdir -p "$STAGE" "$OUT"
 codesign --verify --deep --strict "$STAGE/DoppelDock.app"
 ln -s /Applications "$STAGE/Applications"
 
-cat > "$STAGE/How to open DoppelDock.txt" <<'TXT'
+cat >"$STAGE/How to open DoppelDock.txt" <<'TXT'
 How to open DoppelDock
 
 DoppelDock is a free, open-source tool and isn't notarized by Apple, so macOS
@@ -41,9 +44,9 @@ Rather not see the warning? Install with Homebrew or the one-line Terminal
 command instead: https://zarinlab.github.io/doppeldock/
 TXT
 
-DMG="$OUT/DoppelDock.dmg"   # stable name: releases/latest/download/DoppelDock.dmg always works
+DMG="$OUT/DoppelDock.dmg" # stable name: releases/latest/download/DoppelDock.dmg always works
 rm -f "$DMG" "$DMG.sha256"
 hdiutil create -volname "DoppelDock $VERSION" -srcfolder "$STAGE" -fs HFS+ -format UDZO -ov "$DMG" >/dev/null
 hdiutil verify "$DMG" >/dev/null 2>&1
-(cd "$OUT" && shasum -a 256 "$(basename "$DMG")" > "$(basename "$DMG").sha256")
+(cd "$OUT" && shasum -a 256 "$(basename "$DMG")" >"$(basename "$DMG").sha256")
 echo "$DMG"

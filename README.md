@@ -43,7 +43,7 @@ Code, Figma, Signal and draw.io. Needs macOS 12 or later, nothing else.
    - **Terminal** (no warning, nothing else needed):
 
      ```bash
-     d=$(mktemp -d) && curl -fsSL https://raw.githubusercontent.com/ZarinLab/doppeldock/main/doppeldock -o "$d/doppeldock" && bash "$d/doppeldock" install
+     d=$(mktemp -d) && curl -fsSL https://github.com/ZarinLab/doppeldock/releases/latest/download/doppeldock -o "$d/doppeldock" && bash "$d/doppeldock" install
      ```
 
 2. **Make a profile.** Open **DoppelDock** from Applications, click **New Profile…**,
@@ -105,7 +105,11 @@ options, or **Remove…** it.
 
 - [Details and command line](docs/details.md): every option, where files live,
   safety checks, how the copy is made, limitations.
-- [Contributing](CONTRIBUTING.md), [Changelog](CHANGELOG.md) and
+- [Architecture](docs/architecture.md) and the
+  [security model](docs/security.md): how DoppelDock is built and what you can
+  expect from it.
+- [Contributing](CONTRIBUTING.md), [Governance](GOVERNANCE.md),
+  [Roadmap](ROADMAP.md), [Changelog](CHANGELOG.md) and
   [Security policy](SECURITY.md).
 - Related: [doppel-app](https://github.com/dotrg-31/doppel-app) does the same
   for the ChatGPT desktop app.

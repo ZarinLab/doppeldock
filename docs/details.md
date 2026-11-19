@@ -36,6 +36,8 @@ the app itself.
 | Update log (own icon) | `~/Library/Logs/DoppelDock/` |
 
 If `/Applications` is not writable for your account, `~/Applications` is used.
+Set `DOPPELDOCK_APPS_DIR` to put new apps in another folder; DoppelDock then
+also looks there for profiles (the tests use this).
 
 ## Safety checks
 

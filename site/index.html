@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <title>DoppelDock – two accounts in the same Mac app, side by side</title>
 <meta name="description" content="Use two accounts in the same Mac app at once, such as a work and a personal account in Claude, Slack, Discord or VS Code. DoppelDock gives Electron apps a second, separately signed-in copy with its own Dock icon. Free and open source.">
 <link rel="canonical" href="https://zarinlab.github.io/doppeldock/">
@@ -21,7 +23,7 @@
   "description": "Use two accounts in the same Mac app at once. DoppelDock gives Electron apps such as Claude, Slack, Discord, Visual Studio Code, Figma and Signal a second, separately signed-in copy with its own Dock icon.",
   "applicationCategory": "UtilitiesApplication",
   "operatingSystem": "macOS 12 or later",
-  "softwareVersion": "1.1.0",
+  "softwareVersion": "1.1.1",
   "license": "https://opensource.org/licenses/MIT",
   "isAccessibleForFree": true,
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
@@ -179,7 +181,7 @@
 
         <div class="panel" role="tabpanel" id="panel-term" aria-labelledby="tab-term" hidden>
           <div class="cmd">
-            <code>d=$(mktemp -d) &amp;&amp; curl -fsSL https://raw.githubusercontent.com/ZarinLab/doppeldock/main/doppeldock -o "$d/doppeldock" &amp;&amp; bash "$d/doppeldock" install</code>
+            <code>d=$(mktemp -d) &amp;&amp; curl -fsSL https://github.com/ZarinLab/doppeldock/releases/latest/download/doppeldock -o "$d/doppeldock" &amp;&amp; bash "$d/doppeldock" install</code>
             <button type="button" class="copy" aria-label="Copy the install command">Copy</button>
           </div>
           <p class="note">Open Terminal, paste this line and press Return. No warnings, nothing else to install.</p>
@@ -301,43 +303,6 @@
   </div>
 </footer>
 
-<script>
-  (function () {
-    // Copy buttons
-    Array.prototype.forEach.call(document.querySelectorAll("button.copy"), function (btn) {
-      var code = btn.parentNode.querySelector("code");
-      btn.addEventListener("click", function () {
-        var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1600); };
-        var fallback = function () {
-          var r = document.createRange(); r.selectNodeContents(code);
-          var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
-          try { document.execCommand("copy"); done(); } catch (e) { btn.textContent = "Press ⌘C"; }
-        };
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(code.textContent).then(done, fallback);
-        } else { fallback(); }
-      });
-    });
-
-    // Install tabs (arrow keys move between them)
-    var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
-    function select(tab) {
-      tabs.forEach(function (t) {
-        var on = t === tab;
-        t.setAttribute("aria-selected", on ? "true" : "false");
-        t.tabIndex = on ? 0 : -1;
-        document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
-      });
-    }
-    tabs.forEach(function (tab, i) {
-      tab.tabIndex = i === 0 ? 0 : -1;
-      tab.addEventListener("click", function () { select(tab); });
-      tab.addEventListener("keydown", function (e) {
-        var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-        if (d) { var t = tabs[(i + d + tabs.length) % tabs.length]; select(t); t.focus(); e.preventDefault(); }
-      });
-    });
-  })();
-</script>
+<script src="app.js"></script>
 </body>
 </html>

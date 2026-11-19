@@ -9,3 +9,6 @@
 # ...except the README's own images.
 !docs/*.png
 !docs/icons/*.png
+
+# Test coverage reports (tests/coverage.sh)
+coverage/

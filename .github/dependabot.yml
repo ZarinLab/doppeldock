@@ -12,3 +12,13 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: ci
+
+  # bashcov (test coverage), pinned with checksums in Gemfile.lock.
+  - package-ecosystem: bundler
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    commit-message:
+      prefix: test

@@ -24,7 +24,9 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck --version
-          shellcheck -s bash -S warning doppeldock tests/smoke.sh tools/make-dmg.sh
+          shellcheck -s bash -S warning doppeldock tests/smoke.sh tests/coverage.sh tools/make-dmg.sh
+      - name: shfmt (code style, settings in .editorconfig)
+        run: pipx run --spec shfmt-py==4.2.0 shfmt -d doppeldock tests/smoke.sh tests/coverage.sh tools/make-dmg.sh
 
   workflows:
     name: Workflow security
@@ -68,6 +70,16 @@ jobs:
 
       - name: Smoke tests
         run: tests/smoke.sh "$ELECTRON_APP"
+
+      - uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true   # installs bashcov from Gemfile.lock (checksummed)
+
+      - name: Test coverage (at least 80%)
+        run: |
+          brew list bash >/dev/null 2>&1 || brew install bash
+          bundle exec tests/coverage.sh "$ELECTRON_APP" 80
 
       - name: Build the DMG
         run: |

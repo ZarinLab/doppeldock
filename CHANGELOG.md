@@ -6,6 +6,41 @@ All notable changes to DoppelDock are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-19
+
+### Added
+
+- About DoppelDock (the "?" button, or DoppelDock › About DoppelDock) shows the
+  version, the unofficial-tool notice and a link to the website. The release
+  notes carry the same notice.
+- Releases now include the script and a source archive alongside the DMG, with
+  `SHA256SUMS` and signed build provenance for all of them (verify with
+  `gh attestation verify`). Homebrew installs the attested source archive.
+- Governance, roadmap, architecture and security model documents, and a
+  documented vulnerability response process.
+- Developer Certificate of Origin sign-off for contributions, checked on every
+  pull request.
+- Test coverage measured in CI (at least 80% of the script's shell statements),
+  and many more tests (menu, options, colours, refusals).
+- `shfmt` code style, enforced in CI; `Brewfile` and `Gemfile` list the
+  development tools.
+- The website sets a Content Security Policy.
+- `DOPPELDOCK_APPS_DIR` chooses another folder for new apps and adds it to
+  where DoppelDock looks for profiles.
+- The Terminal install line downloads the released, attested script instead of
+  the latest code on `main`.
+
+### Changed
+
+- The script is reformatted with `shfmt` (layout only, no behaviour change).
+
+### Fixed
+
+- Apps in the New Profile window's App list were greyed out and could not be
+  chosen (only Other… worked).
+- On Apple silicon Macs, the form's labels were centred instead of
+  right-aligned.
+
 ## [1.1.0] - 2026-11-19
 
 ### Added
@@ -45,6 +80,7 @@ First public version.
   syntax, compile checks for the built-in JavaScript, and building, changing
   and removing profiles from Electron's sample app.
 
-[Unreleased]: https://github.com/ZarinLab/doppeldock/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/ZarinLab/doppeldock/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/ZarinLab/doppeldock/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/ZarinLab/doppeldock/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ZarinLab/doppeldock/releases/tag/v1.0.0

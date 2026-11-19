@@ -18,28 +18,29 @@
 # https://github.com/ZarinLab/doppeldock (MIT licence)
 
 set -euo pipefail
-PATH=/usr/bin:/bin:/usr/sbin:/sbin   # Apple's tools only (cp -c, mktemp, sed...)
+PATH=/usr/bin:/bin:/usr/sbin:/sbin # Apple's tools only (cp -c, mktemp, sed...)
 export PATH
-export LC_ALL=en_US.UTF-8            # count characters, not bytes (Dock-started apps have no locale)
-shopt -s nocasematch                 # macOS paths are case-insensitive
+export LC_ALL=en_US.UTF-8 # count characters, not bytes (Dock-started apps have no locale)
+shopt -s nocasematch      # macOS paths are case-insensitive
 
-VERSION="1.1.0"
+VERSION="1.1.1"
 PB=/usr/libexec/PlistBuddy
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 DATA_ROOT="$HOME/Library/Application Support/DoppelDock"
 LOG_ROOT="$HOME/Library/Logs/DoppelDock"
-MARKER=".doppeldock-profile"         # in each data folder DoppelDock created or adopted
+MARKER=".doppeldock-profile" # in each data folder DoppelDock created or adopted
 
 # This script's real path (the copy wrapper calls it to rebuild after an update).
 _s="${BASH_SOURCE[0]}"
 while [[ -L "$_s" ]]; do
-  _t=$(readlink "$_s"); if [[ "$_t" == /* ]]; then _s="$_t"; else _s="$(dirname "$_s")/$_t"; fi
+  _t=$(readlink "$_s")
+  if [[ "$_t" == /* ]]; then _s="$_t"; else _s="$(dirname "$_s")/$_t"; fi
 done
 SELF="$(cd "$(dirname "$_s")" && pwd -P)/$(basename "$_s")"
 unset _s _t
 
 WORK=""
-SWAP_TARGET=""   # set while the old app is moved aside, so an interruption can put it back
+SWAP_TARGET="" # set while the old app is moved aside, so an interruption can put it back
 cleanup() {
   if [[ -n "$SWAP_TARGET" && ! -e "$SWAP_TARGET" && -d "$WORK/previous.app" ]]; then
     mv "$WORK/previous.app" "$SWAP_TARGET" || true
@@ -53,7 +54,10 @@ trap cleanup EXIT
 # helpers
 # ---------------------------------------------------------------------------
 
-die()  { printf 'doppeldock: %s\n' "$*" >&2; exit 1; }
+die() {
+  printf 'doppeldock: %s\n' "$*" >&2
+  exit 1
+}
 warn() { printf 'doppeldock: %s\n' "$*" >&2; }
 info() { printf '%s\n' "$*"; }
 
@@ -94,7 +98,7 @@ abs_path() {
   local p="$1"
   [[ "$p" == /* ]] || p="$PWD/$p"
   while [[ "$p" == */ && "$p" != / ]]; do p="${p%/}"; done
-  case "/$p/" in */./*|*/../*) die "path must not contain '.' or '..' parts: $1" ;; esac
+  case "/$p/" in */./* | */../*) die "path must not contain '.' or '..' parts: $1" ;; esac
   printf '%s\n' "$p"
 }
 
@@ -110,7 +114,7 @@ source_version() {
 validate_label() {
   local l="$1"
   [[ -n "$l" ]] || die "profile name is empty"
-  (( ${#l} <= 40 )) || die "profile name is longer than 40 characters"
+  ((${#l} <= 40)) || die "profile name is longer than 40 characters"
   [[ "$l" != */* && "$l" != *:* && "$l" != .* ]] || die "profile name must not contain '/' or ':' or start with '.'"
   [[ ! "$l" =~ [[:cntrl:]] ]] || die "profile name must not contain control characters"
 }
@@ -137,16 +141,16 @@ bundle_in_use() {
 
 color_hex() {
   case "$1" in
-    green)  echo "#2F9E44" ;;
-    blue)   echo "#1971C2" ;;
+    green) echo "#2F9E44" ;;
+    blue) echo "#1971C2" ;;
     purple) echo "#7048E8" ;;
-    pink)   echo "#C2255C" ;;
+    pink) echo "#C2255C" ;;
     orange) echo "#E8590C" ;;
-    teal)   echo "#0C8599" ;;
-    red)    echo "#E03131" ;;
-    gray|grey) echo "#495057" ;;
-    \#*)    [[ "$1" =~ ^#[0-9A-Fa-f]{6}$ ]] && echo "$1" || echo "" ;;
-    *)      echo "" ;;
+    teal) echo "#0C8599" ;;
+    red) echo "#E03131" ;;
+    gray | grey) echo "#495057" ;;
+    \#*) [[ "$1" =~ ^#[0-9A-Fa-f]{6}$ ]] && echo "$1" || echo "" ;;
+    *) echo "" ;;
   esac
 }
 
@@ -156,34 +160,47 @@ default_color() {
   echo "${names[$((sum % ${#names[@]}))]}"
 }
 
+# Folders to look in for apps, in order. DOPPELDOCK_APPS_DIR, if set, comes
+# first and is also where new apps go (used by the tests; see docs/details.md).
+apps_dirs() {
+  if [[ -n "${DOPPELDOCK_APPS_DIR:-}" ]]; then printf '%s\n' "$DOPPELDOCK_APPS_DIR"; fi
+  printf '%s\n' /Applications "$HOME/Applications"
+}
+
 default_install_dir() {
-  if [[ -w /Applications ]]; then echo /Applications; else echo "$HOME/Applications"; fi
+  if [[ -n "${DOPPELDOCK_APPS_DIR:-}" ]]; then
+    printf '%s\n' "$DOPPELDOCK_APPS_DIR"
+  elif [[ -w /Applications ]]; then
+    echo /Applications
+  else
+    echo "$HOME/Applications"
+  fi
 }
 
 # All DoppelDock-made apps in the usual places.
 find_profiles() {
   local d a
-  for d in /Applications "$HOME/Applications"; do
+  while IFS= read -r d; do
     [[ -d "$d" ]] || continue
     for a in "$d"/*.app; do
       [[ -e "$a" ]] || continue
       if is_doppeldock_app "$a"; then echo "$a"; fi
     done
-  done
+  done < <(apps_dirs)
   return 0
 }
 
 # Electron apps that can be used as a source.
 find_sources() {
   local d a
-  for d in /Applications "$HOME/Applications"; do
+  while IFS= read -r d; do
     [[ -d "$d" ]] || continue
     for a in "$d"/*.app; do
       [[ -e "$a" ]] || continue
       is_doppeldock_app "$a" && continue
       if is_electron "$a"; then echo "$a"; fi
     done
-  done
+  done < <(apps_dirs)
   return 0
 }
 
@@ -326,15 +343,15 @@ write_vars() { # file name=value...
   local f="$1" kv
   shift
   for kv in "$@"; do
-    printf '%s=%q\n' "${kv%%=*}" "${kv#*=}" >> "$f"
+    printf '%s=%q\n' "${kv%%=*}" "${kv#*=}" >>"$f"
   done
 }
 
 write_launcher_wrapper() { # file source_app source_exec data_dir extra_arg
   local f="$1"
-  printf '#!/bin/bash\n# Generated by DoppelDock: opens the original app with its own data folder.\nshopt -s nocasematch\n' > "$f"
+  printf '#!/bin/bash\n# Generated by DoppelDock: opens the original app with its own data folder.\nshopt -s nocasematch\n' >"$f"
   write_vars "$f" "SOURCE_APP=$2" "SOURCE_EXEC=$3" "DATA_DIR=$4" "EXTRA_ARG=$5"
-  cat >> "$f" <<'BODY'
+  cat >>"$f" <<'BODY'
 BIN="$SOURCE_APP/Contents/MacOS/$SOURCE_EXEC"
 mkdir -p "$DATA_DIR"
 
@@ -356,9 +373,9 @@ BODY
 
 write_copy_wrapper() { # file source_app source_exec data_dir doppeldock_path log_file title extra_arg
   local f="$1"
-  printf '#!/bin/bash\n# Generated by DoppelDock: runs this copy with its own data folder.\n' > "$f"
+  printf '#!/bin/bash\n# Generated by DoppelDock: runs this copy with its own data folder.\n' >"$f"
   write_vars "$f" "SOURCE_APP=$2" "SOURCE_EXEC=$3" "DATA_DIR=$4" "DOPPELDOCK=$5" "LOG_FILE=$6" "TITLE=$7" "EXTRA_ARG=$8"
-  cat >> "$f" <<'BODY'
+  cat >>"$f" <<'BODY'
 APP="$(cd "$(dirname "$0")/../.." && pwd -P)"
 PB=/usr/libexec/PlistBuddy
 mkdir -p "$DATA_DIR"
@@ -392,9 +409,9 @@ BODY
 # ---------------------------------------------------------------------------
 
 source_entitlements() { # app out.plist
-  codesign -d --entitlements - --xml "$1" > "$2" 2>/dev/null \
-    || codesign -d --entitlements :- "$1" > "$2" 2>/dev/null \
-    || : > "$2"
+  codesign -d --entitlements - --xml "$1" >"$2" 2>/dev/null ||
+    codesign -d --entitlements :- "$1" >"$2" 2>/dev/null ||
+    : >"$2"
 }
 
 # Entitlements an ad-hoc signature cannot carry (they need the vendor's team ID
@@ -405,18 +422,20 @@ adapt_entitlements() { # plist
   local key
   while IFS= read -r key; do
     case "$key" in
-      com.apple.application-identifier | com.apple.developer.* | keychain-access-groups | com.apple.security.application-groups \
-        | com.apple.security.cs.allow-dyld-environment-variables)  # not with library validation off
-        $PB -c "Delete :$key" "$1" ;;
+      com.apple.application-identifier | com.apple.developer.* | keychain-access-groups | com.apple.security.application-groups | \
+        com.apple.security.cs.allow-dyld-environment-variables) # not with library validation off
+        $PB -c "Delete :$key" "$1"
+        ;;
     esac
-  done < <(/usr/bin/osascript -l JavaScript - "$1" <<'JS'
+  done < <(
+    /usr/bin/osascript -l JavaScript - "$1" <<'JS'
 function run(argv) {
   ObjC.import("Foundation");
   var d = $.NSDictionary.dictionaryWithContentsOfFile(argv[0]);
   return d.isNil() ? "" : ObjC.deepUnwrap(d.allKeys).join("\n");
 }
 JS
-)
+  )
   $PB -c "Delete :com.apple.security.cs.disable-library-validation" "$1" 2>/dev/null || true
   $PB -c "Add :com.apple.security.cs.disable-library-validation bool true" "$1"
 }
@@ -431,20 +450,27 @@ rebuild_script() {
   if [[ "$SELF" == */Cellar/doppeldock/*/bin/doppeldock ]]; then
     # Homebrew keeps each version in its own folder; use its stable "opt" link.
     local opt="${SELF%%/Cellar/*}/opt/doppeldock/bin/doppeldock"
-    if [[ -f "$opt" ]]; then printf '%s\n' "$opt"; return 0; fi
+    if [[ -f "$opt" ]]; then
+      printf '%s\n' "$opt"
+      return 0
+    fi
   else
     case "$SELF" in
-      /tmp/* | /private/tmp/* | /var/folders/* | /private/var/folders/*) ;;  # incl. macOS app translocation
-      *) printf '%s\n' "$SELF"; return 0 ;;
+      /tmp/* | /private/tmp/* | /var/folders/* | /private/var/folders/*) ;; # incl. macOS app translocation
+      *)
+        printf '%s\n' "$SELF"
+        return 0
+        ;;
     esac
   fi
-  local a
-  for a in /Applications/DoppelDock.app "$HOME/Applications/DoppelDock.app"; do
+  local d a
+  while IFS= read -r d; do
+    a="$d/DoppelDock.app"
     if [[ "$(plist_get "$a/Contents/Info.plist" CFBundleIdentifier)" == "$DOPPELDOCK_APP_ID" && -f "$a/Contents/Resources/doppeldock" ]]; then
       printf '%s\n' "$a/Contents/Resources/doppeldock"
       return 0
     fi
-  done
+  done < <(apps_dirs)
   return 0
 }
 
@@ -454,8 +480,10 @@ rebuild_script() {
 #   ADOPT: 1 to accept an existing, non-empty data folder not made by DoppelDock
 build() {
   local src label="$2" mode="$3" hex="$4" badge="$5" data_dir="$6" install_dir="$7" target="$8" adopt="$9" style="${10:-tint+badge}" appearance="${11:-system}"
-  style=$(lower "$style"); appearance=$(lower "$appearance"); mode=$(lower "$mode")
-  case "$style" in tint+badge|tint|badge) ;; *) die "style must be tint+badge, tint or badge" ;; esac
+  style=$(lower "$style")
+  appearance=$(lower "$appearance")
+  mode=$(lower "$mode")
+  case "$style" in tint+badge | tint | badge) ;; *) die "style must be tint+badge, tint or badge" ;; esac
   # Chromium switches (not macOS "-Key value" arguments, which some apps open as files).
   local extra_arg=""
   case "$appearance" in
@@ -499,8 +527,8 @@ build() {
 
   # Never overwrite anything DoppelDock did not make for this same profile.
   if [[ -e "$app_path" ]]; then
-    is_doppeldock_app "$app_path" && [[ "$(plist_get "$app_path/Contents/Info.plist" CFBundleIdentifier)" == "$bundle_id" ]] \
-      || die "$app_path already exists and is not this DoppelDock profile; not touching it"
+    is_doppeldock_app "$app_path" && [[ "$(plist_get "$app_path/Contents/Info.plist" CFBundleIdentifier)" == "$bundle_id" ]] ||
+      die "$app_path already exists and is not this DoppelDock profile; not touching it"
   fi
   # "new" never replaces an existing profile; that is what "rebuild" is for.
   if [[ -z "$target" && -e "$app_path" ]]; then
@@ -510,8 +538,8 @@ build() {
   local other
   while IFS= read -r other; do
     [[ -n "$other" && "$(canon_dir "$other")" != "$(canon_dir "$app_path")" ]] || continue
-    [[ "$(plist_get "$other/Contents/Info.plist" CFBundleIdentifier)" == "$bundle_id" ]] \
-      && die "this profile already exists: $other (use 'rebuild' or pick another name)"
+    [[ "$(plist_get "$other/Contents/Info.plist" CFBundleIdentifier)" == "$bundle_id" ]] &&
+      die "this profile already exists: $other (use 'rebuild' or pick another name)"
   done < <(find_profiles)
 
   # Data folder: absolute, never the home folder itself, and either new/empty,
@@ -519,7 +547,8 @@ build() {
   if [[ -n "$data_dir" ]]; then data_dir=$(abs_path "$data_dir"); else data_dir="$DATA_ROOT/$safe_id/$slug"; fi
   case "$data_dir" in
     / | "$HOME" | "$HOME/Library" | "$HOME/Library/Application Support" | "$src" | "$src/"* | "$app_path" | "$app_path/"*)
-      die "not a usable data folder: $data_dir" ;;
+      die "not a usable data folder: $data_dir"
+      ;;
   esac
   if [[ -d "$data_dir" && -n "$(ls -A "$data_dir" 2>/dev/null)" ]]; then
     local owner=""
@@ -549,7 +578,7 @@ build() {
   if [[ "$mode" == launcher ]]; then
     mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
     plist="$bundle/Contents/Info.plist"
-    cat > "$plist" <<'PLIST'
+    cat >"$plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -567,7 +596,7 @@ PLIST
     plutil -replace CFBundleIdentifier -string "$bundle_id" "$plist"
     plutil -replace CFBundleName -string "$(app_display_name "$app_path")" "$plist"
     plutil -replace CFBundleDisplayName -string "$(app_display_name "$app_path")" "$plist"
-    if (( icon_ok )); then
+    if ((icon_ok)); then
       cp "$WORK/doppeldock.icns" "$bundle/Contents/Resources/doppeldock.icns"
     else
       local src_icon
@@ -586,22 +615,22 @@ PLIST
     local version_before
     version_before=$(source_version "$src")
     # APFS clone: near-instant and takes almost no extra disk space (same volume).
-    cp -Rc "$src" "$bundle" 2>"$WORK/cp.log" \
-      || die "copying $src_name failed (is it being updated?); try again in a minute"
-    [[ "$(source_version "$src")" == "$version_before" ]] \
-      || die "$src_name changed while it was being copied (an update?); try again"
+    cp -Rc "$src" "$bundle" 2>"$WORK/cp.log" ||
+      die "copying $src_name failed (is it being updated?); try again in a minute"
+    [[ "$(source_version "$src")" == "$version_before" ]] ||
+      die "$src_name changed while it was being copied (an update?); try again"
     # Start only from an intact, vendor-signed copy.
-    codesign --verify --deep --strict "$bundle" 2>/dev/null \
-      || die "the copy of $src_name does not pass its original signature check; not continuing"
+    codesign --verify --deep --strict "$bundle" 2>/dev/null ||
+      die "the copy of $src_name does not pass its original signature check; not continuing"
 
     plist="$bundle/Contents/Info.plist"
     plutil -replace CFBundleIdentifier -string "$bundle_id" "$plist"
     plutil -replace CFBundleDisplayName -string "$(app_display_name "$app_path")" "$plist"
     # CFBundleName stays as it is: Electron finds its helper apps by that name.
-    $PB -c "Delete :CFBundleURLTypes" "$plist" 2>/dev/null || true       # links keep going to the original
-    $PB -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true  # so do files
+    $PB -c "Delete :CFBundleURLTypes" "$plist" 2>/dev/null || true      # links keep going to the original
+    $PB -c "Delete :CFBundleDocumentTypes" "$plist" 2>/dev/null || true # so do files
     $PB -c "Delete :UTExportedTypeDeclarations" "$plist" 2>/dev/null || true
-    if (( icon_ok )); then
+    if ((icon_ok)); then
       cp "$WORK/doppeldock.icns" "$bundle/Contents/Resources/doppeldock.icns"
       $PB -c "Delete :CFBundleIconName" "$plist" 2>/dev/null || true
       plutil -replace CFBundleIconFile -string doppeldock "$plist"
@@ -616,7 +645,7 @@ PLIST
     source_entitlements "$src" "$WORK/entitlements.plist"
     [[ -s "$WORK/entitlements.plist" ]] || printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' \
       '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
-      '<plist version="1.0"><dict/></plist>' > "$WORK/entitlements.plist"
+      '<plist version="1.0"><dict/></plist>' >"$WORK/entitlements.plist"
     adapt_entitlements "$WORK/entitlements.plist"
     codesign --force -s - -o runtime -i "$bundle_id" --entitlements "$WORK/entitlements.plist" \
       "$bundle/Contents/MacOS/$src_exec" 2>/dev/null || die "signing the copy failed"
@@ -641,7 +670,7 @@ PLIST
 
   # Mark the data folder as this profile's (only folders with this mark are ever deleted).
   mkdir -p "$data_dir"
-  printf '%s\n' "$bundle_id" > "$data_dir/$MARKER"
+  printf '%s\n' "$bundle_id" >"$data_dir/$MARKER"
 
   # Swap in the new app; put the old one back if that fails.
   if [[ -e "$app_path" ]] && bundle_in_use "$app_path"; then
@@ -651,7 +680,7 @@ PLIST
     SWAP_TARGET="$app_path"
     mv "$app_path" "$WORK/previous.app" || die "cannot move the old app out of the way"
   fi
-  mv "$bundle" "$app_path" || die "cannot install $app_path"   # cleanup puts the old app back
+  mv "$bundle" "$app_path" || die "cannot install $app_path" # cleanup puts the old app back
   SWAP_TARGET=""
   "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
   cleanup
@@ -671,24 +700,67 @@ cmd_new() {
   local src="" label="" mode="launcher" color="" badge="" data_dir="" install_dir="" yes=0 adopt=0 style="tint+badge" appearance="system"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --app) need_arg "$@"; src="$2"; shift 2 ;;
-      --name) need_arg "$@"; label="$2"; shift 2 ;;
-      --mode) need_arg "$@"; mode="$2"; shift 2 ;;
-      --color|--colour) need_arg "$@"; color="$2"; shift 2 ;;
-      --badge) need_arg "$@"; badge="$2"; shift 2 ;;
-      --style) need_arg "$@"; style="$2"; shift 2 ;;
-      --appearance) need_arg "$@"; appearance="$2"; shift 2 ;;
-      --data-dir) need_arg "$@"; data_dir="$2"; shift 2 ;;
-      --install-dir) need_arg "$@"; install_dir="$2"; shift 2 ;;
-      --adopt-data-dir) adopt=1; shift ;;
-      --yes|-y) yes=1; shift ;;
+      --app)
+        need_arg "$@"
+        src="$2"
+        shift 2
+        ;;
+      --name)
+        need_arg "$@"
+        label="$2"
+        shift 2
+        ;;
+      --mode)
+        need_arg "$@"
+        mode="$2"
+        shift 2
+        ;;
+      --color | --colour)
+        need_arg "$@"
+        color="$2"
+        shift 2
+        ;;
+      --badge)
+        need_arg "$@"
+        badge="$2"
+        shift 2
+        ;;
+      --style)
+        need_arg "$@"
+        style="$2"
+        shift 2
+        ;;
+      --appearance)
+        need_arg "$@"
+        appearance="$2"
+        shift 2
+        ;;
+      --data-dir)
+        need_arg "$@"
+        data_dir="$2"
+        shift 2
+        ;;
+      --install-dir)
+        need_arg "$@"
+        install_dir="$2"
+        shift 2
+        ;;
+      --adopt-data-dir)
+        adopt=1
+        shift
+        ;;
+      --yes | -y)
+        yes=1
+        shift
+        ;;
       *) die "unknown option for new: $1" ;;
     esac
   done
   [[ -n "$src" && -n "$label" ]] || die "usage: doppeldock new --app PATH --name NAME [--mode launcher|copy] [--color COLOR]"
   validate_label "$label"
   [[ -n "$color" ]] || color=$(default_color "$label")
-  local hex; hex=$(color_hex "$color")
+  local hex
+  hex=$(color_hex "$color")
   [[ -n "$hex" ]] || die "unknown colour '$color'"
   [[ -n "$install_dir" ]] || install_dir=$(default_install_dir)
   if [[ "$mode" == copy && $yes -eq 0 ]]; then
@@ -702,9 +774,16 @@ cmd_rebuild() {
   local arg="" adopt=0 app
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --adopt-data-dir) adopt=1; shift ;;
+      --adopt-data-dir)
+        adopt=1
+        shift
+        ;;
       -*) die "unknown option for rebuild: $1" ;;
-      *) [[ -z "$arg" ]] || die "rebuild takes one app path"; arg="$1"; shift ;;
+      *)
+        [[ -z "$arg" ]] || die "rebuild takes one app path"
+        arg="$1"
+        shift
+        ;;
     esac
   done
   [[ -n "$arg" ]] || die "usage: doppeldock rebuild APP_PATH [--adopt-data-dir]"
@@ -713,8 +792,8 @@ cmd_rebuild() {
   local p="$app/Contents/Info.plist"
   valid_bundle_id "$(plist_get "$p" CFBundleIdentifier)" || die "$app has an unexpected bundle ID; not touching it"
   build "$(plist_get "$p" DoppelDockSourceApp)" "$(plist_get "$p" DoppelDockLabel)" "$(plist_get "$p" DoppelDockMode)" \
-        "$(plist_get "$p" DoppelDockColor)" "$(plist_get "$p" DoppelDockBadge)" "$(plist_get "$p" DoppelDockDataDir)" \
-        "" "$app" "$adopt" "$(plist_get "$p" DoppelDockStyle)" "$(plist_get "$p" DoppelDockAppearance)"
+    "$(plist_get "$p" DoppelDockColor)" "$(plist_get "$p" DoppelDockBadge)" "$(plist_get "$p" DoppelDockDataDir)" \
+    "" "$app" "$adopt" "$(plist_get "$p" DoppelDockStyle)" "$(plist_get "$p" DoppelDockAppearance)"
 }
 
 # Move to the Trash (recoverable) instead of deleting.
@@ -733,13 +812,37 @@ cmd_change() {
   local arg="" color="" style="" appearance="" mode="" badge=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --color|--colour) need_arg "$@"; color="$2"; shift 2 ;;
-      --style) need_arg "$@"; style="$2"; shift 2 ;;
-      --appearance) need_arg "$@"; appearance="$2"; shift 2 ;;
-      --mode) need_arg "$@"; mode="$2"; shift 2 ;;
-      --badge) need_arg "$@"; badge="$2"; shift 2 ;;
+      --color | --colour)
+        need_arg "$@"
+        color="$2"
+        shift 2
+        ;;
+      --style)
+        need_arg "$@"
+        style="$2"
+        shift 2
+        ;;
+      --appearance)
+        need_arg "$@"
+        appearance="$2"
+        shift 2
+        ;;
+      --mode)
+        need_arg "$@"
+        mode="$2"
+        shift 2
+        ;;
+      --badge)
+        need_arg "$@"
+        badge="$2"
+        shift 2
+        ;;
       -*) die "unknown option for change: $1" ;;
-      *) [[ -z "$arg" ]] || die "change takes one app path"; arg="$1"; shift ;;
+      *)
+        [[ -z "$arg" ]] || die "change takes one app path"
+        arg="$1"
+        shift
+        ;;
     esac
   done
   [[ -n "$arg" ]] || die "usage: doppeldock change APP_PATH [--color C] [--style S] [--appearance A] [--mode M] [--badge B]"
@@ -759,16 +862,23 @@ cmd_change() {
   [[ -n "$mode" ]] || mode=$(plist_get "$p" DoppelDockMode)
   [[ -n "$badge" ]] || badge=$(plist_get "$p" DoppelDockBadge)
   build "$(plist_get "$p" DoppelDockSourceApp)" "$(plist_get "$p" DoppelDockLabel)" "$mode" "$hex" "$badge" \
-        "$(plist_get "$p" DoppelDockDataDir)" "" "$app" 0 "$style" "$appearance"
+    "$(plist_get "$p" DoppelDockDataDir)" "" "$app" 0 "$style" "$appearance"
 }
 
 cmd_remove() {
   local arg="" delete_data=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --delete-data) delete_data=1; shift ;;
+      --delete-data)
+        delete_data=1
+        shift
+        ;;
       -*) die "unknown option for remove: $1" ;;
-      *) [[ -z "$arg" ]] || die "remove takes one app path"; arg="$1"; shift ;;
+      *)
+        [[ -z "$arg" ]] || die "remove takes one app path"
+        arg="$1"
+        shift
+        ;;
     esac
   done
   [[ -n "$arg" ]] || die "usage: doppeldock remove APP_PATH [--delete-data]"
@@ -790,7 +900,7 @@ cmd_remove() {
   info "Moved $app to the Trash"
 
   [[ -n "$data_dir" ]] || return 0
-  if (( delete_data )); then
+  if ((delete_data)); then
     local owner=""
     [[ -f "$data_dir/$MARKER" ]] && owner=$(head -n 1 "$data_dir/$MARKER")
     if [[ "$owner" == "$bundle_id" ]]; then
@@ -815,7 +925,7 @@ cmd_list() {
       "$(plist_get "$p" DoppelDockMode)" "$(plist_get "$p" DoppelDockSourceApp)" \
       "$(plist_get "$p" DoppelDockSourceVersion)" "$(plist_get "$p" DoppelDockDataDir)"
   done < <(find_profiles)
-  (( n )) || info "No DoppelDock apps found in /Applications or ~/Applications."
+  ((n)) || info "No DoppelDock apps found in /Applications or ~/Applications."
 }
 
 # ---------------------------------------------------------------------------
@@ -825,7 +935,7 @@ cmd_list() {
 DOPPELDOCK_APP_ID="io.github.zarinlab.doppeldock"
 
 write_gui_script() { # file
-  cat > "$1" <<'JS'
+  cat >"$1" <<'JS'
 ObjC.import("Cocoa");
 var app = Application.currentApplication();
 app.includeStandardAdditions = true;
@@ -836,6 +946,10 @@ var COLORS = [["Green", "#2F9E44"], ["Blue", "#1971C2"], ["Purple", "#7048E8"], 
               ["Orange", "#E8590C"], ["Teal", "#0C8599"], ["Red", "#E03131"], ["Gray", "#495057"]];
 var STYLES = [["Colour and badge", "tint+badge"], ["Colour only", "tint"], ["Badge only (original colours)", "badge"]];
 var APPEARANCES = [["Same as the Mac", "system"], ["Light", "light"], ["Dark", "dark"]];
+// Text alignment numbers differ by processor (Apple silicon: centre 1, right 2; Intel: the
+// reverse), and the scripting bridge only knows the Intel ones.
+var ARM = app.doShellScript("/usr/bin/uname -m") === "arm64";
+var ALIGN_CENTER = ARM ? 1 : 2, ALIGN_RIGHT = ARM ? 2 : 1;
 
 // ---- helpers ---------------------------------------------------------------
 function q(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
@@ -861,6 +975,46 @@ function alert(title, text, buttons, style) { // -> index of the clicked button
   a.alertStyle = (style === undefined) ? 1 : style;  // 1 = informational
   (buttons || ["OK"]).forEach(function (b) { a.addButtonWithTitle(b); });
   return Number(a.runModal) - 1000;
+}
+var WEBSITE = "https://zarinlab.github.io/doppeldock/";
+function showAbout() {
+  var center = $.NSMutableParagraphStyle.alloc.init;
+  center.alignment = ALIGN_CENTER;
+  var text = "Use two accounts in the same app on your Mac, side by side.\nFree and open source (MIT licence).\n\n" +
+             "Unofficial: not affiliated with the makers of the apps it works with. " +
+             "App names are trademarks of their owners.\n\n";
+  var link = WEBSITE.replace(/^https:\/\//, "").replace(/\/$/, "");
+  // (JXA can't call NSAttributedString's initWithString:…, so build it in place.)
+  var credits = $.NSMutableAttributedString.alloc.init;
+  credits.replaceCharactersInRangeWithString($.NSMakeRange(0, 0), text + link);
+  credits.addAttributesRange($({NSFont: $.NSFont.systemFontOfSize(11), NSParagraphStyle: center,
+                                NSColor: $.NSColor.labelColor}), $.NSMakeRange(0, text.length + link.length));
+  credits.addAttributeValueRange("NSLink", $.NSURL.URLWithString(WEBSITE), $.NSMakeRange(text.length, link.length));
+  var info = $.NSBundle.mainBundle.infoDictionary;
+  $.NSApp.orderFrontStandardAboutPanelWithOptions($({
+    ApplicationName: TITLE,
+    ApplicationVersion: ObjC.unwrap(info.objectForKey("CFBundleShortVersionString")) || "",
+    Version: "",
+    Copyright: "© 2026 The DoppelDock authors",
+    Credits: credits
+  }));
+  $.NSApp.activateIgnoringOtherApps(true);
+}
+// The app menu's "About DoppelDock" shows the panel above (with the website link).
+function hookAboutMenu() {
+  var main = $.NSApp.mainMenu;
+  if (!main || main.isNil() || Number(main.numberOfItems) < 1) return;
+  var sub = main.itemAtIndex(0).submenu;
+  if (!sub || sub.isNil()) return;
+  for (var i = 0; i < Number(sub.numberOfItems); i++) {
+    var it = sub.itemAtIndex(i);
+    if ((it.action && ObjC.unwrap(it.action) === "orderFrontStandardAboutPanel:") || /^About /.test(it.title.js)) {
+      it.target = controller;
+      it.action = "showAbout:";
+      return;
+    }
+  }
+  log("no About item in the app menu");
 }
 function fail(e) {
   if (e && e.errorNumber === -128) return;
@@ -993,7 +1147,7 @@ function label(text, x, y, w, h, size, bold, secondary, mask) {
 
 function fieldLabel(text, y) {
   var t = label(text, 4, y + 3, 96, 18, 13, false, false, 0);
-  t.alignment = 1;  // right
+  t.alignment = ALIGN_RIGHT;
   return t;
 }
 
@@ -1002,16 +1156,19 @@ function indexOfValue(list, value) {
   return -1;
 }
 
-// App menu items: NSPopUpButton's addItemWithTitle drops items with the same title,
-// which would put the menu out of step with np.sources, so build NSMenuItems.
+// App menu items: NSPopUpButton's insertItemWithTitle drops items with the same title,
+// which would put the menu out of step with np.sources. So each item goes in under a
+// unique placeholder (keeping the pop-up's own action, without which macOS greys the
+// item out) and is renamed afterwards.
 function appTitle(p, list) {
   var same = list.filter(function (x) { return base(x) === base(p); }).length > 1;
   return same ? base(p) + " (" + p.replace(/\/[^\/]*$/, "").replace($.NSHomeDirectory().js, "~") + ")" : base(p);
 }
-function appItem(p, list) {
-  var it = $.NSMenuItem.alloc.initWithTitleActionKeyEquivalent(appTitle(p, list), null, "");
+function insertApp(p, list, at) {
+  np.app.insertItemWithTitleAtIndex("⁣doppeldock-" + at, at);
+  var it = np.app.itemAtIndex(at);
+  it.title = appTitle(p, list);
   it.image = smallIcon(p);
-  return it;
 }
 
 // edit: a profile row to edit, or null for a new profile
@@ -1025,7 +1182,7 @@ function buildForm(edit) {
 
   c.addSubview(fieldLabel("App:", H - 60));
   np.app = $.NSPopUpButton.alloc.initWithFramePullsDown($.NSMakeRect(106, H - 62, 270, 26), false);
-  np.sources.forEach(function (p) { np.app.menu.addItem(appItem(p, np.sources)); });
+  np.sources.forEach(function (p, i) { insertApp(p, np.sources, i); });
   if (!edit) {
     np.app.menu.addItem($.NSMenuItem.separatorItem);
     np.app.addItemWithTitle("Other…");
@@ -1143,7 +1300,7 @@ function appChanged() {
     if (at < 0) {
       np.sources.push(path);
       at = np.sources.length - 1;
-      np.app.menu.insertItemAtIndex(appItem(path, np.sources), at);
+      insertApp(path, np.sources, at);
     }
     np.app.selectItemAtIndex(at);
     np.lastApp = at;
@@ -1230,6 +1387,7 @@ ObjC.registerSubclass({
     "editProfile:": {types: ["void", ["id"]], implementation: function (s) { guarded(editSelected); }},
     "clearSelection:": {types: ["void", ["id"]], implementation: function (s) { ui.table.deselectAll($()); updateButtons(); }},
     "removeProfile:": {types: ["void", ["id"]], implementation: function (s) { guarded(removeSelected); }},
+    "showAbout:": {types: ["void", ["id"]], implementation: function (s) { try { showAbout(); } catch (e) { fail(e); } }},
     "appChanged:": {types: ["void", ["id"]], implementation: function (s) { try { appChanged(); } catch (e) { fail(e); } }},
     "previewChanged:": {types: ["void", ["id"]], implementation: function (s) { try { updatePreview(); } catch (e) { log(e); } }},
     "controlTextDidChange:": {types: ["void", ["id"]], implementation: function (n) { try { updatePreview(); } catch (e) { log(e); } }},
@@ -1279,7 +1437,14 @@ function buildWindow() {
   ui.subtitleText = "Each profile is a second copy of an app, with its own sign-in.";
   ui.subtitle = label(ui.subtitleText, 20, H - 66, W - 70, 18, 12, false, true, 2 | 8);
   c.addSubview(ui.subtitle);
-  ui.spinner = $.NSProgressIndicator.alloc.initWithFrame($.NSMakeRect(W - 40, H - 62, 16, 16));
+  // "?" button: About DoppelDock, with the website link.
+  var about = $.NSButton.buttonWithTitleTargetAction("", controller, "showAbout:");
+  about.bezelStyle = 9;  // help button
+  about.frame = $.NSMakeRect(W - 46, H - 48, 26, 26);
+  about.autoresizingMask = 1 | 8;
+  about.toolTip = "About DoppelDock";
+  c.addSubview(about);
+  ui.spinner = $.NSProgressIndicator.alloc.initWithFrame($.NSMakeRect(W - 40, H - 72, 16, 16));
   ui.spinner.style = 1;
   ui.spinner.controlSize = 1;
   ui.spinner.usesThreadedAnimation = true;
@@ -1308,7 +1473,7 @@ function buildWindow() {
 
   ui.empty = $.NSTextField.wrappingLabelWithString("No profiles yet.\nClick New Profile to make your first one.");
   ui.empty.frame = $.NSMakeRect(40, (H - 80) / 2 + 20, W - 80, 40);
-  ui.empty.alignment = 2;
+  ui.empty.alignment = ALIGN_CENTER;
   ui.empty.textColor = $.NSColor.secondaryLabelColor;
   ui.empty.autoresizingMask = 2 | 8 | 32;
   c.addSubview(ui.empty);
@@ -1325,6 +1490,7 @@ function buildWindow() {
 function run() {
   try {
     buildWindow();
+    try { hookAboutMenu(); } catch (e) { log(e); }
     loadProfiles();
     ui.win.initialFirstResponder = ui.add;  // focus New Profile, not the list (no row picked by itself)
     ui.win.makeKeyAndOrderFront($());
@@ -1348,7 +1514,11 @@ cmd_install() {
   local dir=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --dir) need_arg "$@"; dir="$2"; shift 2 ;;
+      --dir)
+        need_arg "$@"
+        dir="$2"
+        shift 2
+        ;;
       *) die "unknown option for install: $1" ;;
     esac
   done
@@ -1358,16 +1528,16 @@ cmd_install() {
   [[ -n "$dir" && -w "$dir" ]] || die "cannot write to ${dir:-the install folder}"
   local target="$dir/DoppelDock.app"
   if [[ -e "$target" ]]; then
-    [[ "$(plist_get "$target/Contents/Info.plist" CFBundleIdentifier)" == "$DOPPELDOCK_APP_ID" ]] \
-      || die "$target exists and is not DoppelDock; not touching it"
+    [[ "$(plist_get "$target/Contents/Info.plist" CFBundleIdentifier)" == "$DOPPELDOCK_APP_ID" ]] ||
+      die "$target exists and is not DoppelDock; not touching it"
     bundle_in_use "$target" && die "DoppelDock is open; quit it first"
   fi
 
   WORK=$(mktemp -d "$dir/.doppeldock.XXXXXX") || die "cannot create a work folder in $dir"
   local app="$WORK/DoppelDock.app" plist
   write_gui_script "$WORK/gui.js"
-  osacompile -l JavaScript -s -o "$app" "$WORK/gui.js" 2>"$WORK/osacompile.log" \
-    || die "building the DoppelDock app failed: $(cat "$WORK/osacompile.log")"
+  osacompile -l JavaScript -s -o "$app" "$WORK/gui.js" 2>"$WORK/osacompile.log" ||
+    die "building the DoppelDock app failed: $(cat "$WORK/osacompile.log")"
   plist="$app/Contents/Info.plist"
   cp "$SELF" "$app/Contents/Resources/doppeldock"
   chmod 755 "$app/Contents/Resources/doppeldock"
@@ -1432,7 +1602,7 @@ pick_from_list() { # prompt items... ; prints the chosen item, returns 1 on q/em
   done
   read -r -p "$prompt" choice || return 1
   [[ -n "$choice" && "$choice" != q ]] || return 1
-  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
+  if [[ "$choice" =~ ^[0-9]+$ ]] && ((choice >= 1 && choice <= ${#items[@]})); then
     printf '%s\n' "${items[$((choice - 1))]}"
   else
     printf '%s\n' "$choice"
@@ -1449,20 +1619,26 @@ menu_new() {
   while IFS= read -r a; do [[ -n "$a" ]] && sources+=("$a"); done < <(find_sources)
   echo
   echo "Which app would you like a second copy of?"
-  if (( ${#sources[@]} )); then
+  if ((${#sources[@]})); then
     src=$(pick_from_list "Number (or drag an app here, q to go back): " "${sources[@]}") || return 0
   else
     read -r -p "Drag the app here: " src || return 0
   fi
   src=$(clean_path "$src")
   src="${src%/}"
-  [[ -d "$src" ]] || { warn "not found: $src"; return 0; }
-  is_electron "$src" || { warn "$(app_display_name "$src") is not an Electron app; DoppelDock only supports Electron apps"; return 0; }
+  [[ -d "$src" ]] || {
+    warn "not found: $src"
+    return 0
+  }
+  is_electron "$src" || {
+    warn "$(app_display_name "$src") is not an Electron app; DoppelDock only supports Electron apps"
+    return 0
+  }
 
   echo
   read -r -p "Name for this profile [Personal]: " label || return 0
   [[ -n "$label" ]] || label=Personal
-  ( validate_label "$label" ) || return 0
+  (validate_label "$label") || return 0
   label=$(capitalize "$label")
 
   echo
@@ -1472,7 +1648,10 @@ menu_new() {
   read -r -p "Choose [1]: " choice || return 0
   if [[ "$choice" != 2 ]]; then
     copy_mode_warning
-    confirm "Make the copy?" || { echo "Cancelled."; return 0; }
+    confirm "Make the copy?" || {
+      echo "Cancelled."
+      return 0
+    }
     mode=copy
   fi
 
@@ -1490,7 +1669,10 @@ menu_new() {
 menu_pick_profile() { # prompt -> path
   local profiles=() a
   while IFS= read -r a; do [[ -n "$a" ]] && profiles+=("$a"); done < <(find_profiles)
-  (( ${#profiles[@]} )) || { echo "You have no profiles yet." >&2; return 1; }
+  ((${#profiles[@]})) || {
+    echo "You have no profiles yet." >&2
+    return 1
+  }
   pick_from_list "$1" "${profiles[@]}"
 }
 
@@ -1503,7 +1685,10 @@ menu_rebuild() {
 menu_remove() {
   local app
   app=$(menu_pick_profile "Remove which? (q to go back) ") || return 0
-  is_doppeldock_app "$app" || { warn "not a DoppelDock app: $app"; return 0; }
+  is_doppeldock_app "$app" || {
+    warn "not a DoppelDock app: $app"
+    return 0
+  }
   confirm "Remove $(app_display_name "$app")?" || return 0
   if confirm "Also move its sign-in and settings to the Trash?"; then
     /bin/bash "$SELF" remove "$app" --delete-data || true
@@ -1528,11 +1713,14 @@ TXT
     read -r -p "Choose: " choice || exit 0
     case "$choice" in
       1) menu_new ;;
-      2) echo; cmd_list ;;
+      2)
+        echo
+        cmd_list
+        ;;
       3) menu_rebuild ;;
       4) menu_remove ;;
       5) /bin/bash "$SELF" install || true ;;
-      q|"") exit 0 ;;
+      q | "") exit 0 ;;
       *) echo "Unknown choice." ;;
     esac
   done
@@ -1546,15 +1734,30 @@ usage() { sed -n '2,18p' "$SELF" | sed 's/^# \{0,1\}//'; }
 
 case "${1:-}" in
   "") menu ;;
-  install) shift; cmd_install "$@" ;;
-  new) shift; cmd_new "$@" ;;
+  install)
+    shift
+    cmd_install "$@"
+    ;;
+  new)
+    shift
+    cmd_new "$@"
+    ;;
   list) cmd_list ;;
-  rebuild) shift; cmd_rebuild "$@" ;;
-  change) shift; cmd_change "$@" ;;
-  remove) shift; cmd_remove "$@" ;;
-  sources) find_sources ;;    # used by the DoppelDock app
-  profiles) find_profiles ;;  # used by the DoppelDock app
-  help|-h|--help) usage ;;
-  --version|version) echo "DoppelDock $VERSION" ;;
+  rebuild)
+    shift
+    cmd_rebuild "$@"
+    ;;
+  change)
+    shift
+    cmd_change "$@"
+    ;;
+  remove)
+    shift
+    cmd_remove "$@"
+    ;;
+  sources) find_sources ;;   # used by the DoppelDock app
+  profiles) find_profiles ;; # used by the DoppelDock app
+  help | -h | --help) usage ;;
+  --version | version) echo "DoppelDock $VERSION" ;;
   *) die "unknown command '$1' (try: doppeldock help)" ;;
 esac
