@@ -88,8 +88,14 @@ then a blank line and the why, if it isn't obvious.
 
 1. Set `VERSION` at the top of `doppeldock`.
 2. Move the **Unreleased** notes in `CHANGELOG.md` under the new version and date.
-3. Commit, tag `vX.Y.Z`, push the tag, and create a GitHub release from it with
-   the changelog notes.
+3. Commit and push, and wait for CI to pass.
+4. Tag `vX.Y.Z` and push the tag. The **Release** workflow checks the tag
+   matches `VERSION`, builds `DoppelDock.dmg` and publishes the GitHub release
+   with the changelog notes.
+5. The Homebrew formula in
+   [ZarinLab/homebrew-tap](https://github.com/ZarinLab/homebrew-tap) updates
+   itself within 6 hours (tested before it is committed). To do it at once, run
+   its **Update formulae** workflow from the Actions tab.
 
 By contributing, you agree that your contributions are licensed under the
 [MIT licence](LICENSE).
