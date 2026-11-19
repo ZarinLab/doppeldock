@@ -19,6 +19,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # Same layout as the published site (see pages.yml), so its image links resolve.
+      - name: Assemble the site images
+        run: |
+          mkdir -p site/img/icons
+          cp docs/*.gif docs/*.png site/img/
+          cp docs/icons/*.png site/img/icons/
+
       - uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: >-
