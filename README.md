@@ -1,5 +1,9 @@
 # DoppelDock
 
+[![CI](https://github.com/ZarinLab/doppeldock/actions/workflows/ci.yml/badge.svg)](https://github.com/ZarinLab/doppeldock/actions/workflows/ci.yml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+![macOS 12+](https://img.shields.io/badge/macOS-12%2B-lightgrey.svg)
+
 **Use two accounts in the same app on your Mac, side by side**: for example your
 work and personal Slack, each in its own window, with its own sign-in and its own
 coloured icon.
@@ -82,6 +86,8 @@ options, or **Remove…** it.
 
 - [Details and command line](docs/details.md): every option, where files live,
   safety checks, how the copy is made, limitations.
+- [Contributing](CONTRIBUTING.md), [Changelog](CHANGELOG.md) and
+  [Security policy](SECURITY.md).
 - Related: [doppel-app](https://github.com/dotrg-31/doppel-app) does the same
   for the ChatGPT desktop app.
 - Licence: MIT, see [LICENSE](LICENSE).

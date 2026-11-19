@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          shellcheck -s bash -S warning doppeldock tests/smoke.sh
+
+  test:
+    name: Tests (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Get Electron's sample app
+        run: |
+          mkdir -p "$RUNNER_TEMP/electron"
+          cd "$RUNNER_TEMP/electron"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund electron@33.4.11
+          app="$RUNNER_TEMP/electron/node_modules/electron/dist/Electron.app"
+          # npm's copy is only linker-signed; sign the whole bundle so it is a valid source app.
+          codesign --force --deep -s - "$app"
+          echo "ELECTRON_APP=$app" >> "$GITHUB_ENV"
+
+      - name: Smoke tests
+        run: tests/smoke.sh "$ELECTRON_APP"

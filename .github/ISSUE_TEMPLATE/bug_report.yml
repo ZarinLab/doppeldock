@@ -1,0 +1,63 @@
+name: Bug report
+description: Something doesn't work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please don't include passwords, tokens or the contents of your app's data folder.
+        Security problems go to [Security › Report a vulnerability](https://github.com/ZarinLab/doppeldock/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open DoppelDock
+        2. New Profile… with app X, own icon on
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: DoppelDock version
+      description: Run `doppeldock --version`, or see Get Info on DoppelDock.app.
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac
+      placeholder: macOS 27.2, Apple silicon
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: App and its version
+      placeholder: Slack 4.41.105
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Show its own icon in the Dock
+      options:
+        - "On (copy)"
+        - "Off (same icon)"
+        - "Not about a profile"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Messages or logs
+      description: Any error message, and for update problems the log in `~/Library/Logs/DoppelDock/`.
+      render: text
