@@ -4,9 +4,21 @@ Use a second account in an app on your Mac, side by side with your usual one.
 For example your personal Slack next to your work Slack, each in its own
 window, with its own sign-in and its own coloured icon.
 
-DoppelDock works with apps built on Electron, such as Slack, Discord, Visual
-Studio Code, Figma, Signal and draw.io. It needs nothing besides macOS 12 or
-later; it has been tested on macOS 27 on Apple silicon.
+DoppelDock works with apps built on Electron, such as Claude, Slack, Discord,
+Visual Studio Code, Figma, Signal and draw.io. It needs nothing besides macOS
+12 or later; it has been tested on macOS 27 on Apple silicon.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/demo-dark.gif">
+    <img src="docs/demo-light.gif" width="640"
+         alt="The New Profile form: as the colour, style, appearance and app change, the preview of the new app's icon changes with them">
+  </picture>
+</p>
+
+| Original | Colour and badge | Colour only | Badge only |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/icons/original.png" width="88" alt="The app's original icon"> | <img src="docs/icons/colour-and-badge.png" width="88" alt="The icon recoloured, with a letter badge"> | <img src="docs/icons/colour-only.png" width="88" alt="The icon recoloured, no badge"> | <img src="docs/icons/badge-only.png" width="88" alt="The original icon with a letter badge"> |
 
 > **Unofficial.** DoppelDock is not affiliated with, endorsed by or supported by
 > the makers of any app it works with. App names are trademarks of their owners.
@@ -39,6 +51,14 @@ later; it has been tested on macOS 27 on Apple silicon.
 3. Open the new app (for example **Slack Personal**), sign in with your other
    account, and keep it in the Dock: right-click its icon while it is open and
    choose **Options › Keep in Dock**.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/main-dark.png">
+    <img src="docs/main-light.png" width="560"
+         alt="The DoppelDock window listing three profiles, each with its own coloured icon">
+  </picture>
+</p>
 
 Open DoppelDock again at any time to add more profiles, or select one to
 **Open**, **Edit** or **Remove** it. **Edit…** changes a profile's colour,

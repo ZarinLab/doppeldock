@@ -5,3 +5,7 @@
 *.png
 .DS_Store
 .doppeldock.*
+
+# ...except the README's own images.
+!docs/*.png
+!docs/icons/*.png

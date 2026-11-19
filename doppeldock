@@ -1010,7 +1010,7 @@ function appItem(p, list) {
 
 // edit: a profile row to edit, or null for a new profile
 function buildForm(edit) {
-  var W = 540, H = 410;
+  var W = 540, H = 440;
   np = {edit: edit, sources: lines(dd(["sources"])), colors: COLORS.slice()};
   if (edit && np.sources.indexOf(edit.sourcePath) < 0) np.sources.push(edit.sourcePath);
   np.win = $.NSPanel.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(0, 0, W, H), 1, 2, false);
@@ -1074,7 +1074,7 @@ function buildForm(edit) {
   np.own.state = (!edit || edit.mode === "copy") ? 1 : 0;
   c.addSubview(np.own);
   np.help = $.NSTextField.wrappingLabelWithString("");
-  np.help.frame = $.NSMakeRect(126, 64, W - 146, 72);
+  np.help.frame = $.NSMakeRect(126, 58, W - 146, 110);
   np.help.font = $.NSFont.systemFontOfSize(11);
   np.help.textColor = $.NSColor.secondaryLabelColor;
   c.addSubview(np.help);
