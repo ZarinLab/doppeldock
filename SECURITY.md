@@ -2,8 +2,32 @@
 
 ## Supported versions
 
-Only the latest release of DoppelDock gets fixes. To update, run the install
-line from the README again.
+Only the latest release of DoppelDock gets fixes. To update, install it again
+the same way you installed it (see the README).
+
+## Verifying a download
+
+Every `DoppelDock.dmg` is built by this repository's
+[Release workflow](.github/workflows/release.yml) from the tagged code, and
+GitHub records signed build provenance for it. To check a download with the
+[GitHub CLI](https://cli.github.com/):
+
+```bash
+gh attestation verify DoppelDock.dmg -R ZarinLab/doppeldock
+```
+
+Each release also lists the DMG's SHA-256 checksum in `DoppelDock.dmg.sha256`.
+
+## How the project is protected
+
+- Secret scanning with push protection, and Dependabot alerts.
+- CodeQL code scanning of the GitHub Actions workflows, and
+  [zizmor](https://docs.zizmor.sh/) and actionlint on every change.
+- Every action pinned to a full commit hash; Dependabot proposes updates only
+  after they have been out for two weeks.
+- Workflows run with the least permissions they need.
+- `main` can't be force-pushed or deleted, and changes need passing CI.
+- A weekly [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/ZarinLab/doppeldock) check.
 
 ## Reporting a problem
 

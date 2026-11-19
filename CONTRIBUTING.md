@@ -36,6 +36,12 @@ These keep DoppelDock safe and installable on any Mac:
   scripts go through `printf %q` (see `write_vars`).
 - **No app makers' logos** in screenshots or other images in this repo. Use
   open-source apps such as draw.io or Bruno for demos.
+- **Workflows:** pin every action to a full commit hash with the version in a
+  comment (`uses: owner/action@<sha> # vX.Y.Z`), use releases that are at least
+  two weeks old, give each job only the permissions it needs, and set
+  `persist-credentials: false` on checkout unless the job pushes. CI runs
+  actionlint and zizmor; run them locally with
+  `uvx --from actionlint-py actionlint` and `uvx zizmor --offline .`.
 - **Keep it understandable.** Plain words in the app and the README; technical
   detail goes in `docs/details.md`.
 

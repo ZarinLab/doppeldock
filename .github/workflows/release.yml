@@ -4,15 +4,20 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   release:
     name: Build DMG and publish the release
     runs-on: macos-latest
+    permissions:
+      contents: write       # create the release and upload the DMG
+      id-token: write       # sign the build provenance
+      attestations: write   # store the build provenance
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check the tag matches VERSION
         run: |
@@ -25,20 +30,31 @@ jobs:
       - name: Build the DMG
         run: tools/make-dmg.sh dist
 
+      - name: Record build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/DoppelDock.dmg
+
       - name: Write the release notes
         run: |
           v="${GITHUB_REF_NAME#v}"
           {
-            echo "**Download:** \`DoppelDock.dmg\` below. It isn't notarized by Apple, so the first time"
-            echo "open it via **System Settings › Privacy & Security › Open Anyway** (see the note inside the DMG)."
-            echo
-            echo "**Homebrew:** \`brew install zarinlab/tap/doppeldock && doppeldock install\`"
-            echo
-            echo "**Terminal:**"
-            echo '```bash'
-            echo 'd=$(mktemp -d) && curl -fsSL https://raw.githubusercontent.com/ZarinLab/doppeldock/main/doppeldock -o "$d/doppeldock" && bash "$d/doppeldock" install'
-            echo '```'
-            echo
+            cat <<'NOTES'
+          **Download:** `DoppelDock.dmg` below. It isn't notarized by Apple, so the first time
+          open it via **System Settings › Privacy & Security › Open Anyway** (see the note inside the DMG).
+          To check it was built by this repository's release workflow:
+          ```bash
+          gh attestation verify DoppelDock.dmg -R ZarinLab/doppeldock
+          ```
+
+          **Homebrew:** `brew install zarinlab/tap/doppeldock && doppeldock install`
+
+          **Terminal:**
+          ```bash
+          d=$(mktemp -d) && curl -fsSL https://raw.githubusercontent.com/ZarinLab/doppeldock/main/doppeldock -o "$d/doppeldock" && bash "$d/doppeldock" install
+          ```
+
+          NOTES
             awk -v v="$v" '
               index($0, "## [" v "]") == 1 { f = 1; next }
               f && (/^## \[/ || /^\[/) { exit }

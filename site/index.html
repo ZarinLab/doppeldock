@@ -277,6 +277,8 @@
           <p>Each profile has its own data folder in <code>~/Library/Application Support/DoppelDock</code>. Things an app keeps elsewhere in your home folder are shared.</p></details>
         <details><summary>Why does macOS warn about the download?</summary>
           <p>Apps downloaded from the web must be notarized by Apple to open without a warning, and DoppelDock isn't (yet). Allow it once in System Settings › Privacy &amp; Security › Open Anyway. Homebrew and the Terminal line build DoppelDock on your own Mac instead, so there is no warning.</p></details>
+        <details><summary>How do I know the download is genuine?</summary>
+          <p>Every DMG is built by DoppelDock's public release workflow from the tagged source code, and GitHub records signed build provenance for it. With the GitHub CLI, run <code>gh attestation verify DoppelDock.dmg -R ZarinLab/doppeldock</code>. Each release also lists the DMG's SHA-256 checksum.</p></details>
         <details><summary>How do I update or uninstall it?</summary>
           <p>To update, quit DoppelDock and install it again the same way: download the new DMG, run <code>brew upgrade doppeldock &amp;&amp; doppeldock install</code>, or run the Terminal line. To uninstall, remove your profiles in DoppelDock, then move DoppelDock to the Trash.</p></details>
         <details><summary>Is it affiliated with the apps it works with?</summary>

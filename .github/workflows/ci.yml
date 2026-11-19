@@ -18,24 +18,44 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: shellcheck
         run: |
           shellcheck --version
           shellcheck -s bash -S warning doppeldock tests/smoke.sh tools/make-dmg.sh
+
+  workflows:
+    name: Workflow security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        run: pipx run --spec actionlint-py==1.7.12.25 actionlint -color
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: pipx run zizmor==1.32.0 --format=github .
 
   test:
     name: Tests (macOS)
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
 
-      - name: Get Electron's sample app
+      # Test-only sample app, pinned to an exact version and never shipped. A lockfile would
+      # make GitHub raise security alerts for an old Electron that no user installs.
+      - name: Get Electron's sample app  # zizmor: ignore[adhoc-packages]
         run: |
           mkdir -p "$RUNNER_TEMP/electron"
           cd "$RUNNER_TEMP/electron"

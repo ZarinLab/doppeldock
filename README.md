@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/ZarinLab/doppeldock/actions/workflows/ci.yml/badge.svg)](https://github.com/ZarinLab/doppeldock/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/ZarinLab/doppeldock)](https://github.com/ZarinLab/doppeldock/releases/latest)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ZarinLab/doppeldock/badge)](https://scorecard.dev/viewer/?uri=github.com/ZarinLab/doppeldock)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 ![macOS 12+](https://img.shields.io/badge/macOS-12%2B-lightgrey.svg)
 
