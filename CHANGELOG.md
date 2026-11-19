@@ -6,14 +6,6 @@ All notable changes to DoppelDock are listed here. The format follows
 
 ## [Unreleased]
 
-### Added
-
-- Contributing guide, code of conduct, security policy and issue and pull
-  request templates.
-- Tests (`tests/smoke.sh`) and CI on GitHub Actions: shellcheck, macOS bash 3.2
-  syntax, compile checks for the built-in JavaScript, and building, changing
-  and removing profiles from Electron's sample app.
-
 ## [1.0.0] - 2026-11-19
 
 First public version.
@@ -32,6 +24,11 @@ First public version.
   choose to delete it.
 - `doppeldock` command line: `install`, `new`, `change`, `rebuild`, `remove`,
   `list`, and a menu.
+- Contributing guide, code of conduct, security policy, and issue and pull
+  request templates.
+- Tests (`tests/smoke.sh`) and CI on GitHub Actions: shellcheck, macOS bash 3.2
+  syntax, compile checks for the built-in JavaScript, and building, changing
+  and removing profiles from Electron's sample app.
 
 [Unreleased]: https://github.com/ZarinLab/doppeldock/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/ZarinLab/doppeldock/releases/tag/v1.0.0
