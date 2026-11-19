@@ -6,6 +6,21 @@ All notable changes to DoppelDock are listed here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-19
+
+### Added
+
+- **Download:** each release now has `DoppelDock.dmg` with the app, an
+  Applications shortcut and a note on opening it the first time (it isn't
+  notarized by Apple). It is built automatically when a version is tagged.
+- **Homebrew:** `brew install zarinlab/tap/doppeldock`.
+- **Website:** <https://zarinlab.github.io/doppeldock/>.
+
+### Fixed
+
+- Own icon profiles made with a Homebrew install keep updating after
+  `brew upgrade` (they now use Homebrew's stable path).
+
 ## [1.0.0] - 2026-11-19
 
 First public version.
@@ -30,5 +45,6 @@ First public version.
   syntax, compile checks for the built-in JavaScript, and building, changing
   and removing profiles from Electron's sample app.
 
-[Unreleased]: https://github.com/ZarinLab/doppeldock/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/ZarinLab/doppeldock/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/ZarinLab/doppeldock/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/ZarinLab/doppeldock/releases/tag/v1.0.0

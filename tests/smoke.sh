@@ -110,6 +110,16 @@ else
   refuses "refuses to remove an app it did not make" /bin/bash "$DD" remove "$SRC"
   check "source app untouched" codesign --verify --deep --strict "$SRC"
 
+  # installed with Homebrew: copies must call the stable "opt" path, not the versioned Cellar one
+  BREW="$WORK/brew"
+  mkdir -p "$BREW/Cellar/doppeldock/9.9.9/bin" "$BREW/opt/doppeldock/bin"
+  cp "$DD" "$BREW/Cellar/doppeldock/9.9.9/bin/doppeldock"
+  ln -s "../../../Cellar/doppeldock/9.9.9/bin/doppeldock" "$BREW/opt/doppeldock/bin/doppeldock"
+  check "new (copy) from a Homebrew install" /bin/bash "$BREW/opt/doppeldock/bin/doppeldock" new --app "$SRC" --name "Ci brew" \
+    --mode copy --install-dir "$APPS" --data-dir "$WORK/data-brew" --yes
+  check "copy from Homebrew calls the opt path" grep -q "^DOPPELDOCK=$(cd "$BREW" && pwd -P)/opt/doppeldock/bin/doppeldock\$" "$APPS/$name Ci brew.app/Contents/MacOS/doppeldock-launch"
+  check "remove the Homebrew test profile" /bin/bash "$DD" remove "$APPS/$name Ci brew.app" --delete-data
+
   # install the DoppelDock app
   check "install the DoppelDock app" /bin/bash "$DD" install --dir "$APPS"
   check "DoppelDock app signature is valid" codesign --verify --deep --strict "$APPS/DoppelDock.app"

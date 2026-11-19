@@ -22,7 +22,7 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck --version
-          shellcheck -s bash -S warning doppeldock tests/smoke.sh
+          shellcheck -s bash -S warning doppeldock tests/smoke.sh tools/make-dmg.sh
 
   test:
     name: Tests (macOS)
@@ -48,3 +48,8 @@ jobs:
 
       - name: Smoke tests
         run: tests/smoke.sh "$ELECTRON_APP"
+
+      - name: Build the DMG
+        run: |
+          tools/make-dmg.sh "$RUNNER_TEMP/dist"
+          (cd "$RUNNER_TEMP/dist" && shasum -a 256 -c ./*.sha256)

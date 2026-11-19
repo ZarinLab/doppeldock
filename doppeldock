@@ -23,7 +23,7 @@ export PATH
 export LC_ALL=en_US.UTF-8            # count characters, not bytes (Dock-started apps have no locale)
 shopt -s nocasematch                 # macOS paths are case-insensitive
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 PB=/usr/libexec/PlistBuddy
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 DATA_ROOT="$HOME/Library/Application Support/DoppelDock"
@@ -428,10 +428,16 @@ JS
 # The script an own-icon copy calls to rebuild itself: this one, unless it is a
 # temporary download, in which case the installed DoppelDock app's copy.
 rebuild_script() {
-  case "$SELF" in
-    /tmp/* | /private/tmp/* | /var/folders/* | /private/var/folders/*) ;;
-    *) printf '%s\n' "$SELF"; return 0 ;;
-  esac
+  if [[ "$SELF" == */Cellar/doppeldock/*/bin/doppeldock ]]; then
+    # Homebrew keeps each version in its own folder; use its stable "opt" link.
+    local opt="${SELF%%/Cellar/*}/opt/doppeldock/bin/doppeldock"
+    if [[ -f "$opt" ]]; then printf '%s\n' "$opt"; return 0; fi
+  else
+    case "$SELF" in
+      /tmp/* | /private/tmp/* | /var/folders/* | /private/var/folders/*) ;;  # incl. macOS app translocation
+      *) printf '%s\n' "$SELF"; return 0 ;;
+    esac
+  fi
   local a
   for a in /Applications/DoppelDock.app "$HOME/Applications/DoppelDock.app"; do
     if [[ "$(plist_get "$a/Contents/Info.plist" CFBundleIdentifier)" == "$DOPPELDOCK_APP_ID" && -f "$a/Contents/Resources/doppeldock" ]]; then

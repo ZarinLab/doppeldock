@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build DMG and publish the release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches VERSION
+        run: |
+          v=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' doppeldock)
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION $v in doppeldock"
+            exit 1
+          fi
+
+      - name: Build the DMG
+        run: tools/make-dmg.sh dist
+
+      - name: Write the release notes
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          {
+            echo "**Download:** \`DoppelDock.dmg\` below. It isn't notarized by Apple, so the first time"
+            echo "open it via **System Settings › Privacy & Security › Open Anyway** (see the note inside the DMG)."
+            echo
+            echo "**Homebrew:** \`brew install zarinlab/tap/doppeldock && doppeldock install\`"
+            echo
+            echo "**Terminal:**"
+            echo '```bash'
+            echo 'd=$(mktemp -d) && curl -fsSL https://raw.githubusercontent.com/ZarinLab/doppeldock/main/doppeldock -o "$d/doppeldock" && bash "$d/doppeldock" install'
+            echo '```'
+            echo
+            awk -v v="$v" '
+              index($0, "## [" v "]") == 1 { f = 1; next }
+              f && (/^## \[/ || /^\[/) { exit }
+              f
+            ' CHANGELOG.md
+          } > notes.md
+          cat notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "DoppelDock ${GITHUB_REF_NAME#v}" \
+              --notes-file notes.md --verify-tag
+          fi

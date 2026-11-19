@@ -1,8 +1,12 @@
 # DoppelDock
 
 [![CI](https://github.com/ZarinLab/doppeldock/actions/workflows/ci.yml/badge.svg)](https://github.com/ZarinLab/doppeldock/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/ZarinLab/doppeldock)](https://github.com/ZarinLab/doppeldock/releases/latest)
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 ![macOS 12+](https://img.shields.io/badge/macOS-12%2B-lightgrey.svg)
+
+**[Website](https://zarinlab.github.io/doppeldock/)** ·
+**[Download](https://github.com/ZarinLab/doppeldock/releases/latest/download/DoppelDock.dmg)**
 
 **Use two accounts in the same app on your Mac, side by side**: for example your
 work and personal Slack, each in its own window, with its own sign-in and its own
@@ -22,11 +26,23 @@ Code, Figma, Signal and draw.io. Needs macOS 12 or later, nothing else.
 
 ## Quick start
 
-1. **Install.** Open Terminal, paste this line and press Return:
+1. **Install**, whichever way you prefer:
 
-   ```bash
-   d=$(mktemp -d) && curl -fsSL https://raw.githubusercontent.com/ZarinLab/doppeldock/main/doppeldock -o "$d/doppeldock" && bash "$d/doppeldock" install
-   ```
+   - **Download** [DoppelDock.dmg](https://github.com/ZarinLab/doppeldock/releases/latest/download/DoppelDock.dmg),
+     drag DoppelDock to Applications and open it. It isn't notarized by Apple, so
+     the first time go to **System Settings › Privacy & Security** and click
+     **Open Anyway**.
+   - **Homebrew** (no warning):
+
+     ```bash
+     brew install zarinlab/tap/doppeldock && doppeldock install
+     ```
+
+   - **Terminal** (no warning, nothing else needed):
+
+     ```bash
+     d=$(mktemp -d) && curl -fsSL https://raw.githubusercontent.com/ZarinLab/doppeldock/main/doppeldock -o "$d/doppeldock" && bash "$d/doppeldock" install
+     ```
 
 2. **Make a profile.** Open **DoppelDock** from Applications, click **New Profile…**,
    pick the app, type a name such as *Personal*, and click **Create**.
@@ -78,7 +94,8 @@ options, or **Remove…** it.
 
 ## Update or uninstall
 
-- **Update DoppelDock:** quit it and run the install line again.
+- **Update DoppelDock:** quit it and install it again the same way (new DMG,
+  `brew upgrade doppeldock && doppeldock install`, or the Terminal line).
 - **Uninstall:** remove your profiles in DoppelDock, then move `DoppelDock.app`
   to the Trash.
 

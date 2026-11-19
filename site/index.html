@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DoppelDock – two accounts in the same Mac app, side by side</title>
+<meta name="description" content="Use two accounts in the same Mac app at once, such as a work and a personal account in Claude, Slack, Discord or VS Code. DoppelDock gives Electron apps a second, separately signed-in copy with its own Dock icon. Free and open source.">
+<link rel="canonical" href="https://zarinlab.github.io/doppeldock/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://zarinlab.github.io/doppeldock/">
+<meta property="og:title" content="DoppelDock: two accounts in the same Mac app, side by side">
+<meta property="og:description" content="A second, separately signed-in copy of Claude, Slack, Discord, VS Code and other Electron apps, with its own Dock icon. Free and open source.">
+<meta property="og:image" content="https://zarinlab.github.io/doppeldock/img/main-light.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "DoppelDock",
+  "description": "Use two accounts in the same Mac app at once. DoppelDock gives Electron apps such as Claude, Slack, Discord, Visual Studio Code, Figma and Signal a second, separately signed-in copy with its own Dock icon.",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "macOS 12 or later",
+  "softwareVersion": "1.1.0",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "downloadUrl": "https://github.com/ZarinLab/doppeldock/releases/latest/download/DoppelDock.dmg",
+  "codeRepository": "https://github.com/ZarinLab/doppeldock",
+  "url": "https://zarinlab.github.io/doppeldock/"
+}
+</script>
+<style>
+  :root {
+    --bg: #ffffff; --bg-soft: #f5f6f8; --text: #1d1f23; --muted: #5d6470;
+    --line: #e2e5ea; --accent: #1f7a3a; --accent-soft: #e7f4ea; --code-bg: #0f1419; --code-text: #e6edf3;
+    --shadow: 0 10px 30px rgba(15, 20, 25, .10);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111316; --bg-soft: #181b1f; --text: #e8eaed; --muted: #9aa1ab;
+      --line: #2a2f36; --accent: #5cc77a; --accent-soft: #16301f; --code-bg: #0b0d10; --code-text: #e6edf3;
+      --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+  header.top { border-bottom: 1px solid var(--line); }
+  header.top .wrap { display: flex; align-items: center; gap: 12px; height: 64px; }
+  header.top .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--text); font-size: 18px; }
+  header.top .brand img { width: 30px; height: 30px; }
+  header.top nav { margin-left: auto; display: flex; gap: 20px; font-size: 15px; }
+  header.top nav a { color: var(--muted); white-space: nowrap; }
+  header.top nav a:hover { color: var(--text); text-decoration: none; }
+
+  .hero { padding: 64px 0 40px; text-align: center; }
+  .hero img.logo { width: 112px; height: 112px; }
+  .hero h1 { font-size: clamp(32px, 5vw, 52px); line-height: 1.1; margin: 18px 0 14px; letter-spacing: -0.02em; }
+  .hero p.lead { font-size: clamp(18px, 2.2vw, 21px); color: var(--muted); max-width: 680px; margin: 0 auto 30px; }
+  .install { max-width: 760px; margin: 0 auto; text-align: left; }
+  .install .label { font-size: 14px; color: var(--muted); margin-bottom: 8px; }
+  .cmd { display: flex; align-items: stretch; background: var(--code-bg); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  .cmd code { flex: 1; color: var(--code-text); padding: 16px 18px; font: 13.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+              white-space: nowrap; overflow-x: auto; }
+  .cmd button { border: 0; background: #2a3038; color: #fff; font: 600 14px/1 inherit; padding: 0 18px; cursor: pointer; min-width: 84px; }
+  .cmd button:hover { background: #343b45; }
+  .meta { margin-top: 12px; font-size: 14px; color: var(--muted); text-align: center; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 12px; justify-content: center; }
+  .tabs button { border: 1px solid var(--line); background: var(--bg); color: var(--muted); border-radius: 999px;
+                 padding: 7px 16px; font: 600 14px/1 inherit; cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .panel[hidden] { display: none; }
+  .panel .note { font-size: 14px; color: var(--muted); margin-top: 10px; text-align: center; }
+  .dl { display: flex; justify-content: center; }
+  .dl a { display: inline-flex; align-items: center; gap: 10px; background: var(--accent); color: #fff; border-radius: 12px;
+          padding: 14px 26px; font-weight: 700; font-size: 17px; box-shadow: var(--shadow); }
+  .dl a:hover { text-decoration: none; filter: brightness(1.08); }
+  @media (prefers-color-scheme: dark) { .dl a { color: #0b1a10; } }
+
+  .shot { margin: 48px auto 0; text-align: center; }
+  .shot img { max-width: 100%; height: auto; border-radius: 12px; box-shadow: var(--shadow); }
+
+  section { padding: 56px 0; }
+  section.soft { background: var(--bg-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  h2 { font-size: 30px; letter-spacing: -0.01em; margin: 0 0 8px; text-align: center; }
+  p.sub { color: var(--muted); text-align: center; margin: 0 auto 36px; max-width: 640px; }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .step { background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .step .n { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+             background: var(--accent-soft); color: var(--accent); font-weight: 700; margin-bottom: 10px; }
+  .step h3 { margin: 0 0 6px; font-size: 18px; }
+  .step p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .feature { border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .feature h3 { margin: 0 0 6px; font-size: 17px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+  .icons { display: flex; justify-content: center; gap: 28px; flex-wrap: wrap; margin-top: 36px; }
+  .icons figure { margin: 0; text-align: center; }
+  .icons img { width: 88px; height: 88px; }
+  .icons figcaption { font-size: 14px; color: var(--muted); margin-top: 6px; }
+
+  table.compare { width: 100%; border-collapse: collapse; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  table.compare th, table.compare td { padding: 14px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 15.5px; }
+  table.compare th { font-size: 15px; }
+  table.compare tr:last-child td { border-bottom: 0; }
+  table.compare td:first-child { color: var(--muted); width: 28%; }
+
+  .faq { max-width: 760px; margin: 0 auto; }
+  details { border-bottom: 1px solid var(--line); padding: 16px 0; }
+  details summary { cursor: pointer; font-weight: 600; list-style: none; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "+"; display: inline-block; width: 22px; color: var(--accent); font-weight: 700; }
+  details[open] summary::before { content: "–"; }
+  details p { color: var(--muted); margin: 10px 0 0 22px; font-size: 15.5px; }
+
+  footer { padding: 36px 0 48px; color: var(--muted); font-size: 14px; border-top: 1px solid var(--line); }
+  footer .links { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; }
+
+  @media (max-width: 760px) {
+    .steps, .features { grid-template-columns: 1fr; }
+    header.top nav { gap: 14px; font-size: 14px; }
+    header.top nav .opt { display: none; }
+    section { padding: 44px 0; }
+    .cmd { flex-direction: column; }
+    .cmd button { padding: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="img/doppeldock-icon.png" alt="" width="30" height="30">DoppelDock</a>
+    <nav aria-label="Main">
+      <a class="opt" href="#how">How it works</a>
+      <a class="opt" href="#faq">FAQ</a>
+      <a href="https://github.com/ZarinLab/doppeldock/releases">Releases</a>
+      <a href="https://github.com/ZarinLab/doppeldock">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <img class="logo" src="img/doppeldock-icon.png" alt="DoppelDock icon" width="112" height="112">
+      <h1>Two accounts. Same app.<br>Side by side.</h1>
+      <p class="lead">DoppelDock gives an app on your Mac a second copy with its own sign-in and its own
+        coloured Dock icon. Your work and personal accounts, open at the same time.</p>
+
+      <div class="install" id="install">
+        <div class="tabs" role="tablist" aria-label="Ways to install">
+          <button type="button" role="tab" id="tab-dmg" aria-controls="panel-dmg" aria-selected="true">Download</button>
+          <button type="button" role="tab" id="tab-brew" aria-controls="panel-brew" aria-selected="false">Homebrew</button>
+          <button type="button" role="tab" id="tab-term" aria-controls="panel-term" aria-selected="false">Terminal</button>
+        </div>
+
+        <div class="panel" role="tabpanel" id="panel-dmg" aria-labelledby="tab-dmg">
+          <div class="dl"><a href="https://github.com/ZarinLab/doppeldock/releases/latest/download/DoppelDock.dmg">Download DoppelDock (.dmg)</a></div>
+          <p class="note">Drag DoppelDock to Applications and open it. It isn't notarized by Apple, so the first time,
+            go to <b>System Settings › Privacy &amp; Security</b> and click <b>Open Anyway</b>.</p>
+        </div>
+
+        <div class="panel" role="tabpanel" id="panel-brew" aria-labelledby="tab-brew" hidden>
+          <div class="cmd">
+            <code>brew install zarinlab/tap/doppeldock &amp;&amp; doppeldock install</code>
+            <button type="button" class="copy" aria-label="Copy the Homebrew command">Copy</button>
+          </div>
+          <p class="note">Installs the <code>doppeldock</code> command and adds the DoppelDock app to Applications. No warnings.</p>
+        </div>
+
+        <div class="panel" role="tabpanel" id="panel-term" aria-labelledby="tab-term" hidden>
+          <div class="cmd">
+            <code>d=$(mktemp -d) &amp;&amp; curl -fsSL https://raw.githubusercontent.com/ZarinLab/doppeldock/main/doppeldock -o "$d/doppeldock" &amp;&amp; bash "$d/doppeldock" install</code>
+            <button type="button" class="copy" aria-label="Copy the install command">Copy</button>
+          </div>
+          <p class="note">Open Terminal, paste this line and press Return. No warnings, nothing else to install.</p>
+        </div>
+
+        <div class="meta">Free and open source (MIT) · macOS 12 or later</div>
+      </div>
+
+      <div class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="img/demo-dark.gif">
+          <img src="img/demo-light.gif" width="640" height="559"
+               alt="The New Profile form: as the colour, style, appearance and app change, the preview of the new app's icon changes with them">
+        </picture>
+      </div>
+    </div>
+  </div>
+
+  <section class="soft" id="how">
+    <div class="wrap">
+      <h2>How it works</h2>
+      <p class="sub">Three steps, about a minute.</p>
+      <div class="steps">
+        <div class="step"><span class="n">1</span><h3>Install</h3>
+          <p>Paste the line above into Terminal once. DoppelDock appears in your Applications folder.</p></div>
+        <div class="step"><span class="n">2</span><h3>Make a profile</h3>
+          <p>Open DoppelDock, click <b>New Profile…</b>, pick the app, type a name such as <i>Personal</i>, click <b>Create</b>.</p></div>
+        <div class="step"><span class="n">3</span><h3>Sign in</h3>
+          <p>Open the new app, sign in with your other account, and keep it in the Dock.</p></div>
+      </div>
+      <div class="shot">
+        <picture>
+          <source media="(prefers-color-scheme: dark)" srcset="img/main-dark.png">
+          <img src="img/main-light.png" width="560" height="472" loading="lazy"
+               alt="The DoppelDock window listing three profiles, each with its own coloured icon">
+        </picture>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>Tell them apart at a glance</h2>
+      <p class="sub">Works with apps built on Electron, such as Claude, Slack, Discord, Visual Studio Code, Figma, Signal and draw.io.</p>
+      <div class="features">
+        <div class="feature"><h3>Its own Dock icon</h3>
+          <p>Each profile gets a recoloured icon, a letter badge, or both, and can keep that icon in the Dock while it is open.</p></div>
+        <div class="feature"><h3>Light or Dark per profile</h3>
+          <p>Open your work copy in Dark and your personal copy in Light, whatever your Mac is set to.</p></div>
+        <div class="feature"><h3>Separate sign-in</h3>
+          <p>Each profile keeps its own sign-in, settings and local data. The original app is never changed.</p></div>
+        <div class="feature"><h3>Keeps itself up to date</h3>
+          <p>Update the original app as usual; profiles follow it the next time you open them.</p></div>
+        <div class="feature"><h3>Safe by design</h3>
+          <p>Removing a profile moves it to the Trash, and its sign-in is kept unless you choose otherwise.</p></div>
+        <div class="feature"><h3>Command line too</h3>
+          <p>Everything the app does is also a <code>doppeldock</code> command, for scripting and power users.</p></div>
+      </div>
+      <div class="icons" role="list">
+        <figure role="listitem"><img src="img/icons/original.png" alt="The app's original icon" width="88" height="88"><figcaption>Original</figcaption></figure>
+        <figure role="listitem"><img src="img/icons/colour-and-badge.png" alt="Recoloured, with a letter badge" width="88" height="88"><figcaption>Colour and badge</figcaption></figure>
+        <figure role="listitem"><img src="img/icons/colour-only.png" alt="Recoloured, no badge" width="88" height="88"><figcaption>Colour only</figcaption></figure>
+        <figure role="listitem"><img src="img/icons/badge-only.png" alt="Original colours with a letter badge" width="88" height="88"><figcaption>Badge only</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="soft" id="modes">
+    <div class="wrap">
+      <h2>Same icon or own icon?</h2>
+      <p class="sub">One checkbox decides what the Dock shows while the profile is open.</p>
+      <table class="compare">
+        <thead><tr><th></th><th>Own icon (box ticked)</th><th>Same icon (box unticked)</th></tr></thead>
+        <tbody>
+          <tr><td>While open, the Dock shows</td><td>The coloured icon and the profile name</td><td>The app's normal icon</td></tr>
+          <tr><td>How it works</td><td>A separate copy of the app, signed on your Mac</td><td>Opens the original app with its own data folder</td></tr>
+          <tr><td>The original app</td><td>Untouched</td><td>Untouched</td></tr>
+          <tr><td>Good to know</td><td>macOS may ask again for permissions; the copy is signed on your Mac instead of by the app's maker</td><td>Nothing is modified</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <h2>Questions</h2>
+      <div class="faq">
+        <details><summary>Which apps does it work with?</summary>
+          <p>Apps built on Electron, which includes many popular desktop apps such as Claude, Slack, Discord, Visual Studio Code, Figma, Signal and draw.io. DoppelDock lists the ones it finds in your Applications folder.</p></details>
+        <details><summary>Can I use two Claude accounts at the same time?</summary>
+          <p>Yes. The Claude desktop app is built on Electron, so DoppelDock can give it a second profile, for example <i>Claude Personal</i> next to your work Claude, each with its own sign-in. The same works for Slack, Discord, Visual Studio Code and other Electron apps.</p></details>
+        <details><summary>Does it change the original app?</summary>
+          <p>No. With the own icon option, DoppelDock makes a separate copy (it takes almost no extra disk space). Without it, nothing is copied or modified at all.</p></details>
+        <details><summary>Where is my second account's data?</summary>
+          <p>Each profile has its own data folder in <code>~/Library/Application Support/DoppelDock</code>. Things an app keeps elsewhere in your home folder are shared.</p></details>
+        <details><summary>Why does macOS warn about the download?</summary>
+          <p>Apps downloaded from the web must be notarized by Apple to open without a warning, and DoppelDock isn't (yet). Allow it once in System Settings › Privacy &amp; Security › Open Anyway. Homebrew and the Terminal line build DoppelDock on your own Mac instead, so there is no warning.</p></details>
+        <details><summary>How do I update or uninstall it?</summary>
+          <p>To update, quit DoppelDock and install it again the same way: download the new DMG, run <code>brew upgrade doppeldock &amp;&amp; doppeldock install</code>, or run the Terminal line. To uninstall, remove your profiles in DoppelDock, then move DoppelDock to the Trash.</p></details>
+        <details><summary>Is it affiliated with the apps it works with?</summary>
+          <p>No. DoppelDock is an independent, unofficial tool. App names are trademarks of their owners. Check each app's terms of use before using it, especially the own icon option, which makes a modified copy of the app.</p></details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="links">
+      <a href="https://github.com/ZarinLab/doppeldock">GitHub</a>
+      <a href="https://github.com/ZarinLab/doppeldock/blob/main/docs/details.md">Details and command line</a>
+      <a href="https://github.com/ZarinLab/doppeldock/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/ZarinLab/doppeldock/blob/main/CONTRIBUTING.md">Contributing</a>
+      <a href="https://github.com/ZarinLab/doppeldock/blob/main/SECURITY.md">Security</a>
+    </div>
+    <div>DoppelDock is free and open source under the MIT licence. It is not affiliated with, endorsed by or supported by the makers of any app it works with.</div>
+  </div>
+</footer>
+
+<script>
+  (function () {
+    // Copy buttons
+    Array.prototype.forEach.call(document.querySelectorAll("button.copy"), function (btn) {
+      var code = btn.parentNode.querySelector("code");
+      btn.addEventListener("click", function () {
+        var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1600); };
+        var fallback = function () {
+          var r = document.createRange(); r.selectNodeContents(code);
+          var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+          try { document.execCommand("copy"); done(); } catch (e) { btn.textContent = "Press ⌘C"; }
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(code.textContent).then(done, fallback);
+        } else { fallback(); }
+      });
+    });
+
+    // Install tabs (arrow keys move between them)
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+    function select(tab) {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        t.tabIndex = on ? 0 : -1;
+        document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+      });
+    }
+    tabs.forEach(function (tab, i) {
+      tab.tabIndex = i === 0 ? 0 : -1;
+      tab.addEventListener("click", function () { select(tab); });
+      tab.addEventListener("keydown", function (e) {
+        var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+        if (d) { var t = tabs[(i + d + tabs.length) % tabs.length]; select(t); t.focus(); e.preventDefault(); }
+      });
+    });
+  })();
+</script>
+</body>
+</html>
