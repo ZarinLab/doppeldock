@@ -15,9 +15,10 @@ Thanks for helping! Bug reports, ideas and pull requests are all welcome.
 | `doppeldock` | The whole tool: one Bash script. It also contains the Mac app (JavaScript for Automation, in `write_gui_script`) and the icon drawing code |
 | `tests/smoke.sh` | Tests: static checks, plus building, changing and removing profiles from an Electron app |
 | `tests/gui_checks.js` | Checks of the Mac app's own JavaScript (its forms, without showing them), run by `tests/smoke.sh` |
-| `tests/site_checks.js` | Checks that the website's structured data and `site/llms.txt` match the page and `VERSION`, run by `tests/smoke.sh` |
+| `tests/site_checks.js` | Checks that the website's structured data, `site/llms.txt` and link-preview image match the page and `VERSION`, run by `tests/smoke.sh` |
 | `tests/coverage.sh` | Statement coverage of the script's shell code (bashcov; the embedded JavaScript is compile-checked and partly tested by `tests/gui_checks.js`); CI requires at least 80% |
 | `tools/make-dmg.sh` | Builds `DoppelDock.dmg` |
+| `tools/make-social-card.js` | Draws `docs/social-card.png`, the website's link-preview image (1200 × 630) |
 | `docs/` | [details](docs/details.md) (reference), [architecture](docs/architecture.md), [security model](docs/security.md), and the README's images |
 | `site/` | The website |
 | `.github/` | CI, release and site workflows, issue and pull request templates, Dependabot |

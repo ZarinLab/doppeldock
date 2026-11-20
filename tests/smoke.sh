@@ -132,7 +132,7 @@ if osascript -l JavaScript "$ROOT/tests/site_checks.js" "$ROOT" >"$WORK/site_che
     esac
     s=$((s + 1))
   done <"$WORK/site_checks.out"
-  ((s == 4)) || bad "website checks: expected 4 results, got $s"
+  ((s == 5)) || bad "website checks: expected 5 results, got $s"
 else
   bad "website checks did not run: $(tail -n 1 "$WORK/site_checks.err")"
 fi

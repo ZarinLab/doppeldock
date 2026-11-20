@@ -1,7 +1,7 @@
 // Checks of the website's machine-readable parts, run by tests/smoke.sh:
 //   osascript -l JavaScript tests/site_checks.js ROOT
 // Prints "ok NAME" or "FAIL NAME (why)" for each check.
-ObjC.import("Foundation");
+ObjC.import("AppKit");
 
 function read(path) {
   var s = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null);
@@ -66,6 +66,17 @@ function run(argv) {
       if (shown[i].q !== listed[i].q) return "question " + (i + 1) + " differs: " + listed[i].q;
       if (shown[i].a !== listed[i].a) return "answer " + (i + 1) + " differs: " + listed[i].q;
     }
+  });
+
+  check("website: link-preview image exists at its stated size", function () {
+    var url = (page.match(/<meta property="og:image" content="[^"]*\/img\/([^"\/]+)">/) || [])[1];
+    if (!url) return "no og:image under img/";
+    var w = (page.match(/<meta property="og:image:width" content="(\d+)">/) || [])[1];
+    var h = (page.match(/<meta property="og:image:height" content="(\d+)">/) || [])[1];
+    var rep = $.NSBitmapImageRep.imageRepWithContentsOfFile(root + "/docs/" + url);
+    if (!rep || rep.isNil()) return "docs/" + url + " not found";
+    if (String(rep.pixelsWide) !== w || String(rep.pixelsHigh) !== h)
+      return "docs/" + url + " is " + rep.pixelsWide + "x" + rep.pixelsHigh + ", page says " + w + "x" + h;
   });
 
   check("website: llms.txt has the current version", function () {

@@ -12,6 +12,8 @@ All notable changes to DoppelDock are listed here. The format follows
   and answers) and an `llms.txt` summary, so search engines and other tools can
   describe DoppelDock accurately. `tests/site_checks.js` keeps them in step
   with the page and the version.
+- A link-preview image for the website (`docs/social-card.png`, drawn by
+  `tools/make-social-card.js`).
 
 ## [1.1.2] - 2026-11-19
 
