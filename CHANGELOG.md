@@ -6,6 +6,13 @@ All notable changes to DoppelDock are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The website has a sitemap, fuller structured data (including its questions
+  and answers) and an `llms.txt` summary, so search engines and other tools can
+  describe DoppelDock accurately. `tests/site_checks.js` keeps them in step
+  with the page and the version.
+
 ## [1.1.2] - 2026-11-19
 
 ### Changed

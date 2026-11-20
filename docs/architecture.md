@@ -60,7 +60,7 @@ generated from it.
 
 | What | Where |
 |---|---|
-| Tests | `tests/smoke.sh` (static checks, checks of the Mac app's forms in `tests/gui_checks.js`, and end-to-end profile tests), `tests/coverage.sh` (statement coverage with bashcov) |
+| Tests | `tests/smoke.sh` (static checks, checks of the Mac app's forms in `tests/gui_checks.js`, checks of the website's structured data in `tests/site_checks.js`, and end-to-end profile tests), `tests/coverage.sh` (statement coverage with bashcov) |
 | CI | `.github/workflows/ci.yml`: lint and code style, workflow security, tests and coverage on macOS, DMG build |
 | Release | `.github/workflows/release.yml`: on a `vX.Y.Z` tag, builds the DMG and the source archive, records signed build provenance and publishes the GitHub release |
 | Website | `site/` published by `.github/workflows/pages.yml` |

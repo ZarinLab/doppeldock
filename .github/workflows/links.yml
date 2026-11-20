@@ -32,5 +32,5 @@ jobs:
             --no-progress
             --max-retries 3
             --exclude '^https://github\.com/ZarinLab/doppeldock/security/advisories/new$'
-            README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md GOVERNANCE.md ROADMAP.md docs/details.md docs/architecture.md docs/security.md site/index.html
+            README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md GOVERNANCE.md ROADMAP.md docs/details.md docs/architecture.md docs/security.md site/index.html site/llms.txt
           fail: true

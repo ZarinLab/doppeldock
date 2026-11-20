@@ -121,6 +121,22 @@ else
   bad "Mac app code not found for its checks"
 fi
 
+# The website's structured data and llms.txt, run with tests/site_checks.js.
+if osascript -l JavaScript "$ROOT/tests/site_checks.js" "$ROOT" >"$WORK/site_checks.out" 2>"$WORK/site_checks.err"; then
+  s=0
+  while IFS= read -r line; do
+    case "$line" in
+      ok\ *) ok "${line#ok }" ;;
+      FAIL\ *) bad "${line#FAIL }" ;;
+      *) continue ;;
+    esac
+    s=$((s + 1))
+  done <"$WORK/site_checks.out"
+  ((s == 4)) || bad "website checks: expected 4 results, got $s"
+else
+  bad "website checks did not run: $(tail -n 1 "$WORK/site_checks.err")"
+fi
+
 if [[ -z "$SRC" ]]; then
   echo
   echo "No Electron app given; skipping the profile tests."

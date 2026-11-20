@@ -8,28 +8,85 @@
 <title>DoppelDock – two accounts in the same Mac app, side by side</title>
 <meta name="description" content="Use two accounts in the same Mac app at once, such as a work and a personal account in Claude, Slack, Discord or VS Code. DoppelDock gives Electron apps a second, separately signed-in copy with its own Dock icon. Free and open source.">
 <link rel="canonical" href="https://zarinlab.github.io/doppeldock/">
+<meta name="robots" content="index, follow, max-image-preview:large">
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="DoppelDock">
+<meta property="og:locale" content="en_US">
 <meta property="og:url" content="https://zarinlab.github.io/doppeldock/">
 <meta property="og:title" content="DoppelDock: two accounts in the same Mac app, side by side">
 <meta property="og:description" content="A second, separately signed-in copy of Claude, Slack, Discord, VS Code and other Electron apps, with its own Dock icon. Free and open source.">
 <meta property="og:image" content="https://zarinlab.github.io/doppeldock/img/main-light.png">
+<meta property="og:image:width" content="900">
+<meta property="og:image:height" content="758">
+<meta property="og:image:alt" content="The DoppelDock window listing three profiles, each with its own coloured icon">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image:alt" content="The DoppelDock window listing three profiles, each with its own coloured icon">
 <link rel="icon" type="image/png" href="img/favicon.png">
+<link rel="alternate" type="text/plain" href="llms.txt" title="DoppelDock in plain text">
+<!-- Structured data for search engines and other tools that read the page. tests/site_checks.js keeps the
+     version in step with the script and the FAQ in step with the Questions section. -->
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "DoppelDock",
-  "description": "Use two accounts in the same Mac app at once. DoppelDock gives Electron apps such as Claude, Slack, Discord, Visual Studio Code, Figma and Signal a second, separately signed-in copy with its own Dock icon.",
-  "applicationCategory": "UtilitiesApplication",
-  "operatingSystem": "macOS 12 or later",
-  "softwareVersion": "1.1.2",
-  "license": "https://opensource.org/licenses/MIT",
-  "isAccessibleForFree": true,
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "downloadUrl": "https://github.com/ZarinLab/doppeldock/releases/latest/download/DoppelDock.dmg",
-  "codeRepository": "https://github.com/ZarinLab/doppeldock",
-  "url": "https://zarinlab.github.io/doppeldock/"
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://zarinlab.github.io/doppeldock/#app",
+      "name": "DoppelDock",
+      "alternateName": "doppeldock",
+      "description": "Use two accounts in the same Mac app at once. DoppelDock gives Electron apps such as Claude, Slack, Discord, Visual Studio Code, Figma and Signal a second, separately signed-in copy with its own Dock icon.",
+      "applicationCategory": "UtilitiesApplication",
+      "operatingSystem": "macOS 12 or later",
+      "softwareVersion": "1.1.2",
+      "license": "https://opensource.org/licenses/MIT",
+      "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "downloadUrl": "https://github.com/ZarinLab/doppeldock/releases/latest/download/DoppelDock.dmg",
+      "installUrl": "https://zarinlab.github.io/doppeldock/#install",
+      "releaseNotes": "https://github.com/ZarinLab/doppeldock/blob/main/CHANGELOG.md",
+      "image": "https://zarinlab.github.io/doppeldock/img/doppeldock-icon.png",
+      "screenshot": "https://zarinlab.github.io/doppeldock/img/main-light.png",
+      "featureList": [
+        "A second, separately signed-in copy of an Electron app",
+        "Its own recoloured Dock icon with an optional letter badge",
+        "Light or Dark appearance per profile",
+        "Profiles follow updates of the original app",
+        "Removing a profile moves it to the Trash",
+        "A doppeldock command for the Terminal"
+      ],
+      "url": "https://zarinlab.github.io/doppeldock/",
+      "sameAs": ["https://github.com/ZarinLab/doppeldock"],
+      "publisher": { "@id": "https://github.com/ZarinLab#org" }
+    },
+    {
+      "@type": "Organization",
+      "@id": "https://github.com/ZarinLab#org",
+      "name": "ZarinLab",
+      "url": "https://github.com/ZarinLab"
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://zarinlab.github.io/doppeldock/#faq",
+      "mainEntity": [
+        { "@type": "Question", "name": "Which apps does it work with?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Apps built on Electron, which includes many popular desktop apps such as Claude, Slack, Discord, Visual Studio Code, Figma, Signal and draw.io. DoppelDock lists the ones it finds in your Applications folder." } },
+        { "@type": "Question", "name": "Can I use two Claude accounts at the same time?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. The Claude desktop app is built on Electron, so DoppelDock can give it a second profile, for example Claude Personal next to your work Claude, each with its own sign-in. The same works for Slack, Discord, Visual Studio Code and other Electron apps." } },
+        { "@type": "Question", "name": "Does it change the original app?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. With the own icon option, DoppelDock makes a separate copy (it takes almost no extra disk space). Without it, nothing is copied or modified at all." } },
+        { "@type": "Question", "name": "Where is my second account's data?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Each profile has its own data folder in ~/Library/Application Support/DoppelDock. Things an app keeps elsewhere in your home folder are shared." } },
+        { "@type": "Question", "name": "Why does macOS warn about the download?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Apps downloaded from the web must be notarized by Apple to open without a warning, and DoppelDock isn't (yet). Allow it once in System Settings › Privacy & Security › Open Anyway. Homebrew and the Terminal line build DoppelDock on your own Mac instead, so there is no warning." } },
+        { "@type": "Question", "name": "How do I know the download is genuine?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Every DMG is built by DoppelDock's public release workflow from the tagged source code, and GitHub records signed build provenance for it. With the GitHub CLI, run gh attestation verify DoppelDock.dmg -R ZarinLab/doppeldock. Each release also lists the DMG's SHA-256 checksum." } },
+        { "@type": "Question", "name": "How do I update or uninstall it?",
+          "acceptedAnswer": { "@type": "Answer", "text": "To update, quit DoppelDock and install it again the same way: download the new DMG, run brew upgrade doppeldock && doppeldock install, or run the Terminal line. To uninstall, remove your profiles in DoppelDock, then move DoppelDock to the Trash." } },
+        { "@type": "Question", "name": "Is it affiliated with the apps it works with?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. DoppelDock is an independent, unofficial tool. App names are trademarks of their owners. Check each app's terms of use before using it, especially the own icon option, which makes a modified copy of the app." } }
+      ]
+    }
+  ]
 }
 </script>
 <style>
@@ -206,7 +263,7 @@
       <p class="sub">Three steps, about a minute.</p>
       <div class="steps">
         <div class="step"><span class="n">1</span><h3>Install</h3>
-          <p>Paste the line above into Terminal once. DoppelDock appears in your Applications folder.</p></div>
+          <p>Download the app, or use Homebrew or the Terminal line above. DoppelDock appears in your Applications folder.</p></div>
         <div class="step"><span class="n">2</span><h3>Make a profile</h3>
           <p>Open DoppelDock, click <b>New Profile…</b>, pick the app, type a name such as <i>Personal</i>, click <b>Create</b>.</p></div>
         <div class="step"><span class="n">3</span><h3>Sign in</h3>

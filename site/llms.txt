@@ -1,0 +1,46 @@
+# DoppelDock
+
+> DoppelDock lets you use two accounts in the same app on your Mac, side by side. It gives an app built on Electron (such as Claude, Slack, Discord, Visual Studio Code, Figma, Signal or draw.io) a second, separately signed-in copy with its own coloured Dock icon. Free and open source (MIT licence), for macOS 12 or later. Current version: 1.1.2.
+
+DoppelDock is an independent, unofficial tool. It is not affiliated with, endorsed by or supported by the makers of the apps it works with; app names are trademarks of their owners.
+
+Key facts:
+
+- Each profile has its own sign-in, settings and local data, in its own folder under `~/Library/Application Support/DoppelDock`. Anything an app keeps elsewhere in the home folder is shared.
+- The original app is never changed. With the "own icon" option, DoppelDock makes a separate copy of the app (signed on the user's Mac) so the Dock shows the profile's coloured icon while it is open. Without it, nothing is copied or modified.
+- Profiles follow updates of the original app. Removing a profile moves it to the Trash.
+- Each profile can be always Light or always Dark, whatever the Mac is set to.
+- Everything the app does is also available as the `doppeldock` command.
+- Limitations: Electron apps only (Chromium-based browsers already have profiles); apps that check their own code signature may refuse to run as an own icon copy; signing in through a browser (for example "Sign in with Google") may return to the original app.
+
+## Install
+
+- Download: https://github.com/ZarinLab/doppeldock/releases/latest/download/DoppelDock.dmg (drag DoppelDock to Applications; it isn't notarized, so the first time allow it in System Settings › Privacy & Security › Open Anyway)
+- Homebrew: `brew install zarinlab/tap/doppeldock && doppeldock install`
+- Terminal: `d=$(mktemp -d) && curl -fsSL https://github.com/ZarinLab/doppeldock/releases/latest/download/doppeldock -o "$d/doppeldock" && bash "$d/doppeldock" install`
+- Verify a download: `gh attestation verify DoppelDock.dmg -R ZarinLab/doppeldock`
+
+## Use
+
+1. Open DoppelDock from Applications and click New Profile….
+2. Pick the app, type a name such as Personal, choose a colour, and click Create.
+3. Open the new app (for example "Slack Personal"), sign in with the other account, and keep it in the Dock.
+
+## Docs
+
+- [README](https://github.com/ZarinLab/doppeldock/blob/main/README.md): quick start, options, managing profiles, good to know
+- [Details and command line](https://github.com/ZarinLab/doppeldock/blob/main/docs/details.md): every option and command, where files live, safety checks, how the copy is made, limitations
+- [Architecture](https://github.com/ZarinLab/doppeldock/blob/main/docs/architecture.md): components, main flows, build, test and release
+- [Security model](https://github.com/ZarinLab/doppeldock/blob/main/docs/security.md): what users can expect, threat model, assurance case
+
+## Project
+
+- [Source code](https://github.com/ZarinLab/doppeldock): a single Bash script with embedded JavaScript for Automation for the Mac window
+- [Releases](https://github.com/ZarinLab/doppeldock/releases) and [changelog](https://github.com/ZarinLab/doppeldock/blob/main/CHANGELOG.md)
+- [Security policy](https://github.com/ZarinLab/doppeldock/blob/main/SECURITY.md): report vulnerabilities privately
+- [Contributing](https://github.com/ZarinLab/doppeldock/blob/main/CONTRIBUTING.md), [roadmap](https://github.com/ZarinLab/doppeldock/blob/main/ROADMAP.md)
+
+## Optional
+
+- [Website](https://zarinlab.github.io/doppeldock/)
+- [Homebrew tap](https://github.com/ZarinLab/homebrew-tap)
