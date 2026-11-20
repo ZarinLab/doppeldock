@@ -34,7 +34,7 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir -p _site/img/icons
-          cp site/index.html site/app.js _site/
+          cp site/*.html site/*.js site/*.xml _site/   # page, script, sitemap, search-engine verification
           cp docs/*.gif docs/*.png _site/img/
           cp docs/icons/*.png _site/img/icons/
 
